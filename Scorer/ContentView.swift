@@ -48,6 +48,7 @@ final class GameViewModel: ObservableObject {
         Player(name: "Player 2", remaining: 501, turns: [])
     ]
     @Published var currentPlayerIndex: Int = 0
+    @Published private(set) var startingPlayerIndex: Int = 0
 
     // Input
     @Published var scoreInput: String = ""
@@ -78,9 +79,21 @@ final class GameViewModel: ObservableObject {
 
     func startGame() {
         guard canStart else { return }
+        // Determine who starts this game. If we're coming from a finished game,
+        // advance to the next player in order; otherwise, keep the current starter.
+        let nextStart: Int
+        switch phase {
+        case .finished:
+            nextStart = (startingPlayerIndex + 1) % max(players.count, 1)
+        default:
+            nextStart = startingPlayerIndex
+        }
+
+        startingPlayerIndex = nextStart
+        currentPlayerIndex = nextStart
+
         actionStack.removeAll()
         scoreInput = ""
-        currentPlayerIndex = 0
         for i in players.indices {
             players[i].remaining = startScore
             players[i].turns.removeAll()
@@ -93,6 +106,7 @@ final class GameViewModel: ObservableObject {
         scoreInput = ""
         actionStack.removeAll()
         currentPlayerIndex = 0
+        startingPlayerIndex = 0
         for i in players.indices {
             players[i].remaining = startScore
             players[i].turns.removeAll()
@@ -375,10 +389,15 @@ final class GameViewModel: ObservableObject {
     }
 
     private func isValidSimpleDoubleOut(before: Int, entered: Int) -> Bool {
-        // Bull finish
-        if before == 50 && entered == 50 { return true }
+        // Allow finishing any total that has a valid double-out checkout.
+        // We only track the total for the visit (not per-dart), so we validate by
+        // checking whether the remaining score is a known double-out finish.
+        if Self.doubleOutFinishes[before] != nil {
+            return true
+        }
 
-        // Simple single-dart double finish: remaining must be an even number <= 40
+        // Fallbacks (redundant for values covered above, but kept for clarity)
+        if before == 50 && entered == 50 { return true }
         if before <= 40, before % 2 == 0, entered == before {
             return true
         }
@@ -756,3 +775,4 @@ private struct FinishedOverlay: View {
 #Preview {
     ContentView()
 }
+
