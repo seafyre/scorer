@@ -516,7 +516,7 @@ private struct GameView: View {
         }
         .padding(.horizontal)
         .padding(.top)
-        .navigationTitle("In Game")
+        .navigationTitle("Leg of X01")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -533,7 +533,7 @@ private struct GameView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will end the current game and return to setup.")
+            Text("This will end the current game & return to main page.")
         }
     }
 
@@ -657,7 +657,7 @@ private struct GameView: View {
                     systemName: "chevron.right",
                     background: .blue
                 ) {
-                    Haptics.impact(.medium)
+                    Haptics.impact(.heavy)
                     vm.submitTurn()
                 }
                 .disabled(!vm.isValidScoreInput)
