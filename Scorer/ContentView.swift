@@ -39,7 +39,7 @@ final class GameViewModel: ObservableObject {
 
     // Settings
     @Published var startScore: Int = 501
-    @Published var doubleOut: Bool = false
+    @Published var doubleOut: Bool = true
 
     // Game State
     @Published var phase: Phase = .setup
@@ -75,6 +75,10 @@ final class GameViewModel: ObservableObject {
 
     func removePlayers(at offsets: IndexSet) {
         players.remove(atOffsets: offsets)
+    }
+    
+    func movePlayers(from source: IndexSet, to destination: Int) {
+        players.move(fromOffsets: source, toOffset: destination)
     }
 
     func startGame() {
@@ -473,12 +477,13 @@ private struct SetupView: View {
             }
 
             Section("Players") {
-                ForEach(vm.players.indices, id: \.self) { i in
-                    TextField("Name", text: $vm.players[i].name)
+                ForEach($vm.players) { $player in
+                    TextField("Name", text: $player.name)
                         .textInputAutocapitalization(.words)
                 }
                 .onDelete(perform: vm.removePlayers)
-
+                .onMove(perform: vm.movePlayers)
+                
                 Button("Add Player") {
                     vm.addPlayer()
                 }
@@ -492,6 +497,7 @@ private struct SetupView: View {
             }
         }
         .navigationTitle("Darts 501")
+        .toolbar { EditButton() }
     }
 }
 
