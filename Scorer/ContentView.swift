@@ -761,6 +761,18 @@ private struct GameView: View {
 
     private let gridCols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
+    private var gameOutTitle: String {
+        switch vm.gameOut {
+        case .straight: return "Straight-Out"
+        case .double: return "Double-Out"
+        case .master: return "Master-Out"
+        }
+    }
+
+    private var inGameTitle: String {
+        "\(vm.startScore) (\(gameOutTitle))"
+    }
+
     var body: some View {
         VStack(spacing: 18) {
             scoreTiles
@@ -774,7 +786,7 @@ private struct GameView: View {
         .padding(.horizontal)
         .padding(.top)
         .background { Color(UIColor.systemGroupedBackground).ignoresSafeArea() }
-        .navigationTitle("Leg of X01")
+        .navigationTitle(inGameTitle)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
