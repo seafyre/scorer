@@ -6,3 +6,7 @@ build/
 *.xcuserstate
 DerivedData/
 xcuserdata/
+# Xcode user state
+*.xcuserstate
+*.xcuserdata/
+
