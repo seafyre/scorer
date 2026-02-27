@@ -948,7 +948,7 @@ private struct PlayerTile: View {
 
             Text("Ø\(averageText)")
                 .font(.subheadline)
-                .foregroundStyle(isActive ? .white.opacity(0.85) : .secondary)
+                .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text("\(remaining)")
@@ -957,9 +957,16 @@ private struct PlayerTile: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .background(isActive ? Color.black : Color.secondary.opacity(0.10))
-        .foregroundStyle(isActive ? .white : .primary)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.thinMaterial)
+            } else {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.secondary.opacity(0.10))
+            }
+        }
+        .foregroundStyle(.primary)
     }
 }
 
