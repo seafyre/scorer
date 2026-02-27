@@ -845,8 +845,7 @@ private struct GameView: View {
             scoreInputDisplay
 
             keypad
-
-            Spacer(minLength: 0)
+                .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .padding(.horizontal)
         .padding(.top)
@@ -932,46 +931,49 @@ private struct GameView: View {
     // MARK: - Keypad
 
     private var keypad: some View {
-        VStack(spacing: 14) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                ForEach([1,2,3,4,5,6,7,8,9], id: \.self) { n in
-                    KeyButton(title: "\(n)") {
-                        Haptics.impact()
-                        vm.appendDigit(n)
+        GeometryReader { proxy in
+            let availableHeight = proxy.size.height
+            let totalSpacing: CGFloat = 12 * 2 + 14 // grid row spacings + spacing between grid and bottom row
+            let keyHeight = max(56, (availableHeight - totalSpacing) / 4)
+
+            VStack(spacing: 14) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach([1,2,3,4,5,6,7,8,9], id: \.self) { n in
+                        KeyButton(title: "\(n)", height: keyHeight) {
+                            Haptics.impact()
+                            vm.appendDigit(n)
+                        }
                     }
                 }
-            }
 
-            HStack(spacing: 14) {
-                KeyIconButton(
-                    systemName: "arrow.uturn.left",
-                    background: .red
-                ) {
-                    Haptics.impact()
-                    vm.undo()
-                }
-                .disabled(vm.actionStack.isEmpty)
+                HStack(spacing: 14) {
+                    KeyIconButton(
+                        systemName: "arrow.uturn.left",
+                        background: .red,
+                        height: keyHeight
+                    ) {
+                        Haptics.impact()
+                        vm.undo()
+                    }
+                    .disabled(vm.actionStack.isEmpty)
 
-                Text("0")
-                    .monospacedDigit()
-                    .font(.system(size: 28, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
+                    KeyButton(title: "0", height: keyHeight) {
                         Haptics.impact()
                         vm.appendDigit(0)
                     }
 
-                KeyIconButton(
-                    systemName: "chevron.right",
-                    background: .blue
-                ) {
-                    Haptics.impact()
-                    vm.submitTurn()
+                    KeyIconButton(
+                        systemName: "chevron.right",
+                        background: .blue,
+                        height: keyHeight
+                    ) {
+                        Haptics.impact()
+                        vm.submitTurn()
+                    }
+                    .disabled(!vm.isValidScoreInput)
                 }
-                .disabled(!vm.isValidScoreInput)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
     }
 }
@@ -1021,7 +1023,14 @@ private struct PlayerTile: View {
 
 private struct KeyButton: View {
     let title: String
+    let height: CGFloat
     let action: () -> Void
+
+    init(title: String, height: CGFloat = 56, action: @escaping () -> Void) {
+        self.title = title
+        self.height = height
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -1029,7 +1038,8 @@ private struct KeyButton: View {
                 .monospacedDigit()
                 .font(.system(size: 28, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .frame(height: 56)
+                .frame(height: height)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1039,12 +1049,14 @@ private struct KeyIconButton: View {
     let systemName: String
     let background: Color
     let fillsWidth: Bool
+    let height: CGFloat
     let action: () -> Void
 
-    init(systemName: String, background: Color, fillsWidth: Bool = true, action: @escaping () -> Void) {
+    init(systemName: String, background: Color, fillsWidth: Bool = true, height: CGFloat = 56, action: @escaping () -> Void) {
         self.systemName = systemName
         self.background = background
         self.fillsWidth = fillsWidth
+        self.height = height
         self.action = action
     }
 
@@ -1054,9 +1066,10 @@ private struct KeyIconButton: View {
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: fillsWidth ? .infinity : nil)
-                .frame(width: fillsWidth ? nil : 56, height: 56)
+                .frame(width: fillsWidth ? nil : 56, height: height)
                 .background(background)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1099,4 +1112,3 @@ private struct FinishedOverlay: View {
 #Preview {
     ContentView()
 }
-
