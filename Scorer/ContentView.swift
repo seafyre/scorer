@@ -765,8 +765,6 @@ private struct GameView: View {
         VStack(spacing: 18) {
             scoreTiles
 
-            finishRow
-
             scoreInputDisplay
 
             keypad
@@ -811,9 +809,12 @@ private struct GameView: View {
         LazyVGrid(columns: gridCols, spacing: 12) {
             ForEach(vm.players.indices, id: \.self) { i in
                 let p = vm.players[i]
+                let checkoutParts = vm.finishSegments(for: p.remaining)
+                let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
                 PlayerTile(
                     name: p.name,
                     averageText: vm.averageText(for: p),
+                    checkoutText: checkoutText,
                     remaining: p.remaining,
                     isActive: i == vm.currentPlayerIndex
                 )
@@ -822,42 +823,6 @@ private struct GameView: View {
                 }
             }
         }
-    }
-
-    private var finishRow: some View {
-        let remaining = vm.players[vm.currentPlayerIndex].remaining
-        let parts = vm.finishSegments(for: remaining)
-
-        return ZStack {
-            // Invisible placeholder to reserve consistent height and spacing
-            HStack(spacing: 10) {
-                Text(" ")
-                    .font(.headline)
-                    .opacity(0)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .hidden() // keep layout space but not visible
-
-            if !parts.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(parts, id: \.self) { part in
-                        Text(part)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.black)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                }
-                .transition(.opacity)
-            }
-        }
-        // Reserve a consistent height so content below doesn't move when parts appear/disappear
-        .frame(height: 44)
     }
 
     private var scoreInputDisplay: some View {
@@ -937,6 +902,7 @@ private struct GameView: View {
 private struct PlayerTile: View {
     let name: String
     let averageText: String
+    let checkoutText: String?
     let remaining: Int
     let isActive: Bool
 
@@ -955,6 +921,12 @@ private struct PlayerTile: View {
                 .monospacedDigit()
                 .font(.system(size: 44, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(checkoutText ?? " ")
+                .font(.body)
+                .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
         }
         .padding(14)
         .background {
@@ -1050,4 +1022,3 @@ private struct FinishedOverlay: View {
 #Preview {
     ContentView()
 }
-
