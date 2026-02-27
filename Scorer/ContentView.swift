@@ -31,6 +31,11 @@ struct GameAction: Identifiable, Equatable {
 
 @MainActor
 final class GameViewModel: ObservableObject {
+    private let playerNamesKey = "players.names"
+    private var cancellables = Set<AnyCancellable>()
+    private let startScoreKey = "settings.startScore"
+    private let gameOutKey = "settings.gameOut"
+
     enum Phase: Equatable {
         case setup
         case inGame
@@ -56,6 +61,52 @@ final class GameViewModel: ObservableObject {
     ]
     @Published var currentPlayerIndex: Int = 0
     @Published private(set) var startingPlayerIndex: Int = 0
+
+    init() {
+        let defaults = UserDefaults.standard
+
+        // Load saved settings first so we can initialize players with the correct remaining
+        if defaults.object(forKey: startScoreKey) != nil {
+            let savedStart = defaults.integer(forKey: startScoreKey)
+            self.startScore = savedStart
+        }
+        if let savedOut = defaults.string(forKey: gameOutKey), let out = GameOut(rawValue: savedOut) {
+            self.gameOut = out
+        }
+
+        // Load saved player names if available (preserves order)
+        if let savedNames = defaults.array(forKey: playerNamesKey) as? [String], !savedNames.isEmpty {
+            self.players = savedNames.map { name in
+                Player(name: name, remaining: startScore, turns: [])
+            }
+        }
+
+        // Persist settings and names whenever they change
+        $startScore
+            .removeDuplicates()
+            .sink { [weak self] value in
+                guard let self else { return }
+                defaults.set(value, forKey: self.startScoreKey)
+            }
+            .store(in: &cancellables)
+
+        $gameOut
+            .removeDuplicates()
+            .sink { [weak self] out in
+                guard let self else { return }
+                defaults.set(out.rawValue, forKey: self.gameOutKey)
+            }
+            .store(in: &cancellables)
+
+        $players
+            .map { $0.map { $0.name } }
+            .removeDuplicates()
+            .sink { [weak self] names in
+                guard let self else { return }
+                defaults.set(names, forKey: self.playerNamesKey)
+            }
+            .store(in: &cancellables)
+    }
 
     // Input
     @Published var scoreInput: String = ""
@@ -168,13 +219,27 @@ final class GameViewModel: ObservableObject {
 
     func finishSegments(for remaining: Int) -> [String] {
         guard remaining > 1 else { return [] }
+        // Helper to split and prefix single-dart numeric segments with "S"
+        func segments(from finish: String) -> [String] {
+            return finish
+                .components(separatedBy: " – ")
+                .map { part in
+                    let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if Int(trimmed) != nil {
+                        return "S\(trimmed)"
+                    } else {
+                        return trimmed
+                    }
+                }
+        }
+
         switch gameOut {
         case .double:
             guard let finish = Self.doubleOutFinishes[remaining] else { return [] }
-            return finish.components(separatedBy: " – ")
+            return segments(from: finish)
         case .master:
             guard let finish = Self.masterOutFinishes[remaining] else { return [] }
-            return finish.components(separatedBy: " – ")
+            return segments(from: finish)
         case .straight:
             return []
         }
@@ -1034,3 +1099,4 @@ private struct FinishedOverlay: View {
 #Preview {
     ContentView()
 }
+
