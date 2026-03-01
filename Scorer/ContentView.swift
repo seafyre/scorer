@@ -826,9 +826,9 @@ private struct GameView: View {
 
     private var gameOutTitle: String {
         switch vm.gameOut {
-        case .straight: return "Straight-Out"
-        case .double: return "Double-Out"
-        case .master: return "Master-Out"
+        case .straight: return "Straight"
+        case .double: return "Double"
+        case .master: return "Master"
         }
     }
 
@@ -849,6 +849,7 @@ private struct GameView: View {
         .padding(.top)
         .background { Color(UIColor.systemGroupedBackground).ignoresSafeArea() }
         .navigationTitle(inGameTitle)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
