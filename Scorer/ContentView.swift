@@ -931,7 +931,7 @@ private struct GameView: View {
         .overlay(alignment: .trailing) {
             KeyIconButton(
                 systemName: "delete.left",
-                background: Color(.systemGray4),
+                background: Color(.systemGray3),
                 fillsWidth: false
             ) {
                 Haptics.selectionChanged()
@@ -1002,25 +1002,25 @@ private struct PlayerTile: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Text(name)
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top) {
+                Text(name)
+                    .font(.headline)
+                Spacer()
+                Text("Ø\(averageText)")
+                    .font(.subheadline)
+                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+            }
 
-            Text("Ø\(averageText)")
+            Text(checkoutText ?? " ")
                 .font(.subheadline)
                 .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
 
             Text("\(remaining)")
                 .monospacedDigit()
                 .font(.system(size: 44, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(checkoutText ?? " ")
-                .font(.body)
-                .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(1)
         }
         .padding(14)
         .background {
