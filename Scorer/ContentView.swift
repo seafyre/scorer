@@ -824,8 +824,6 @@ private struct GameView: View {
     @Binding var showSettings: Bool
     @State private var showQuitConfirm = false
 
-    private let gridCols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
     private var gameOutTitle: String {
         switch vm.gameOut {
         case .straight: return "Straight-Out"
@@ -882,22 +880,44 @@ private struct GameView: View {
     // MARK: - Top Tiles
 
     private var scoreTiles: some View {
-        LazyVGrid(columns: gridCols, spacing: 12) {
-            ForEach(vm.players.indices, id: \.self) { i in
-                let p = vm.players[i]
-                let checkoutParts = vm.finishSegments(for: p.remaining)
-                let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
-                PlayerTile(
-                    name: p.name,
-                    averageText: vm.averageText(for: p),
-                    checkoutText: checkoutText,
-                    remaining: p.remaining,
-                    isActive: i == vm.currentPlayerIndex
-                )
-                .onTapGesture {
-                    vm.currentPlayerIndex = i
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(vm.players.indices, id: \.self) { i in
+                        let p = vm.players[i]
+                        let checkoutParts = vm.finishSegments(for: p.remaining)
+                        let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
+                        PlayerTile(
+                            name: p.name,
+                            averageText: vm.averageText(for: p),
+                            checkoutText: checkoutText,
+                            remaining: p.remaining,
+                            isActive: i == vm.currentPlayerIndex
+                        )
+                        .frame(width: playerTileWidth)
+                        .id(i)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .padding(.horizontal, -16)
+            .onChange(of: vm.currentPlayerIndex) { _, newIndex in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(newIndex, anchor: .center)
                 }
             }
+        }
+    }
+
+    private var playerTileWidth: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        let horizontalPadding: CGFloat = 16 * 2
+        let tileSpacing: CGFloat = 12
+        // Show 2 tiles with a peek of the next one when there are 3+ players
+        if vm.players.count <= 2 {
+            return (screenWidth - horizontalPadding - tileSpacing) / 2
+        } else {
+            return (screenWidth - horizontalPadding - tileSpacing) / 2.15
         }
     }
 
@@ -1011,10 +1031,7 @@ private struct PlayerTile: View {
         .background {
             if isActive {
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(.thinMaterial)
-            } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.secondary.opacity(0.10))
+                    .fill(Color(UIColor.secondarySystemGroupedBackground))
             }
         }
         .foregroundStyle(.primary)
