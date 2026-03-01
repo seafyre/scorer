@@ -43,9 +43,9 @@ final class GameViewModel: ObservableObject {
     }
 
     enum GameOut: String, CaseIterable, Identifiable, Equatable {
-        case straight = "Straight"
-        case double = "Double"
-        case master = "Master"
+        case straight = "Straight Out"
+        case double = "Double Out"
+        case master = "Master Out"
         var id: String { rawValue }
     }
 
@@ -758,6 +758,7 @@ private struct SetupView: View {
             }
         }
         .navigationTitle("Scorer 🎯 ")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
@@ -825,11 +826,7 @@ private struct GameView: View {
     @State private var showQuitConfirm = false
 
     private var gameOutTitle: String {
-        switch vm.gameOut {
-        case .straight: return "Straight"
-        case .double: return "Double"
-        case .master: return "Master"
-        }
+        vm.gameOut.rawValue
     }
 
     private var inGameTitle: String {
