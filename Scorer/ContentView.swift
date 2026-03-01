@@ -837,10 +837,11 @@ private struct GameView: View {
         VStack(spacing: 18) {
             scoreTiles
 
+            Spacer()
+
             scoreInputDisplay
 
             keypad
-                .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .padding(.horizontal)
         .padding(.top)
@@ -930,7 +931,7 @@ private struct GameView: View {
         .overlay(alignment: .trailing) {
             KeyIconButton(
                 systemName: "delete.left",
-                background: .gray,
+                background: Color(.systemGray4),
                 fillsWidth: false
             ) {
                 Haptics.selectionChanged()
@@ -948,50 +949,46 @@ private struct GameView: View {
 
     // MARK: - Keypad
 
+    private let keyHeight: CGFloat = 48
+    private let keySpacing: CGFloat = 10
+
     private var keypad: some View {
-        GeometryReader { proxy in
-            let availableHeight = proxy.size.height
-            let totalSpacing: CGFloat = 12 * 2 + 14 // grid row spacings + spacing between grid and bottom row
-            let keyHeight = max(56, (availableHeight - totalSpacing) / 4)
-
-            VStack(spacing: 14) {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                    ForEach([1,2,3,4,5,6,7,8,9], id: \.self) { n in
-                        KeyButton(title: "\(n)", height: keyHeight) {
-                            Haptics.impact()
-                            vm.appendDigit(n)
-                        }
-                    }
-                }
-
-                HStack(spacing: 14) {
-                    KeyIconButton(
-                        systemName: "arrow.uturn.left",
-                        background: .red,
-                        height: keyHeight
-                    ) {
+        VStack(spacing: keySpacing) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: keySpacing), count: 3), spacing: keySpacing) {
+                ForEach([1,2,3,4,5,6,7,8,9], id: \.self) { n in
+                    KeyButton(title: "\(n)", height: keyHeight) {
                         Haptics.impact()
-                        vm.undo()
+                        vm.appendDigit(n)
                     }
-                    .disabled(vm.actionStack.isEmpty)
-
-                    KeyButton(title: "0", height: keyHeight) {
-                        Haptics.impact()
-                        vm.appendDigit(0)
-                    }
-
-                    KeyIconButton(
-                        systemName: "chevron.right",
-                        background: .blue,
-                        height: keyHeight
-                    ) {
-                        Haptics.impact()
-                        vm.submitTurn()
-                    }
-                    .disabled(!vm.isValidScoreInput)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
+            HStack(spacing: keySpacing) {
+                KeyIconButton(
+                    systemName: "arrow.uturn.left",
+                    background: .red,
+                    height: keyHeight
+                ) {
+                    Haptics.impact()
+                    vm.undo()
+                }
+                .disabled(vm.actionStack.isEmpty)
+
+                KeyButton(title: "0", height: keyHeight) {
+                    Haptics.impact()
+                    vm.appendDigit(0)
+                }
+
+                KeyIconButton(
+                    systemName: "chevron.right",
+                    background: .blue,
+                    height: keyHeight
+                ) {
+                    Haptics.impact()
+                    vm.submitTurn()
+                }
+                .disabled(!vm.isValidScoreInput)
+            }
         }
     }
 }
@@ -1056,7 +1053,7 @@ private struct KeyButton: View {
                 .frame(height: height)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
     }
 }
 
@@ -1079,14 +1076,12 @@ private struct KeyIconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
                 .frame(maxWidth: fillsWidth ? .infinity : nil)
                 .frame(width: fillsWidth ? nil : 56, height: height)
-                .background(background)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .tint(background)
+        .buttonStyle(.glassProminent)
     }
 }
 
