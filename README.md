@@ -1,3 +1,14 @@
-# scorer
+# Scorer – Your simple darts app
 This is a straight-forward darts application for iOS & iPadOS that natively implemented X01 scoring using Swift only for a simple and lightweight experience.
 Developed by Nick Ringelmann (nickringelmann.com)
+
+## To be developed
+- Horizontal view with good usability
+- Enable/Disable players (Player list rehaul)
+- Rehaul of the finish screen
+- "First to/Best of" settings
+- Player statistics
+- Online games with friends with simple join code & accounts
+- More stats on game screen (e.g. first 9-dart-avg)
+- Add "Buy Me A Coffe Link"
+- Casual game modes, e.g. Around the World

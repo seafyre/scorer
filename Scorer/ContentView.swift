@@ -750,12 +750,20 @@ private struct SetupView: View {
                 }
             }
 
-            Section {
-                Button("Start Game") {
-                    vm.startGame()
-                }
-                .disabled(!vm.canStart)
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                vm.startGame()
+            } label: {
+                Text("Start Game")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
             }
+            .buttonStyle(.glassProminent)
+            .disabled(!vm.canStart)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
         }
         .navigationTitle("Scorer 🎯 ")
         .navigationBarTitleDisplayMode(.inline)
@@ -808,6 +816,11 @@ private struct SettingsView: View {
                         Text("System").tag("system")
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("Links") {
+                    Link("My Website", destination: URL(string: "https://nickringelmann.com")!)
+                    Link("GitHub", destination: URL(string: "https://github.com/seafyre/scorer")!)
                 }
             }
             .navigationTitle("Settings")
