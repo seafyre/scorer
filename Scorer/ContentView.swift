@@ -11,6 +11,7 @@ struct Turn: Identifiable, Equatable {
     let before: Int
     let after: Int
     let isBust: Bool
+    var finishDarts: Int?
     let createdAt: Date = Date()
 }
 
@@ -35,11 +36,27 @@ final class GameViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let startScoreKey = "settings.startScore"
     private let gameOutKey = "settings.gameOut"
+    private let matchModeKey = "settings.matchMode"
+    private let legsKey = "settings.legs"
+    private let setsKey = "settings.sets"
 
     enum Phase: Equatable {
         case setup
         case inGame
-        case finished(winnerIndex: Int)
+        case awaitingFinishDarts(winnerIndex: Int)
+        case finished(FinishReason)
+    }
+
+    enum FinishReason: Equatable {
+        case legWon(winnerIndex: Int)
+        case setWon(winnerIndex: Int)
+        case matchWon(winnerIndex: Int)
+    }
+
+    enum MatchMode: String, CaseIterable, Identifiable, Equatable {
+        case firstTo = "First to"
+        case bestOf = "Best of"
+        var id: String { rawValue }
     }
 
     enum GameOut: String, CaseIterable, Identifiable, Equatable {
@@ -52,6 +69,9 @@ final class GameViewModel: ObservableObject {
     // Settings
     @Published var startScore: Int = 501
     @Published var gameOut: GameOut = .double
+    @Published var matchMode: MatchMode = .firstTo
+    @Published var legs: Int = 1
+    @Published var sets: Int = 1
 
     // Game State
     @Published var phase: Phase = .setup
@@ -61,6 +81,33 @@ final class GameViewModel: ObservableObject {
     ]
     @Published var currentPlayerIndex: Int = 0
     @Published private(set) var startingPlayerIndex: Int = 0
+    @Published private(set) var legStartingPlayerIndex: Int = 0
+    @Published private(set) var legsWon: [Int] = []
+    @Published private(set) var setsWon: [Int] = []
+
+    var legsToWinSet: Int {
+        switch matchMode {
+        case .firstTo: return legs
+        case .bestOf: return (legs + 1) / 2
+        }
+    }
+
+    var setsToWinMatch: Int {
+        switch matchMode {
+        case .firstTo: return sets
+        case .bestOf: return (sets + 1) / 2
+        }
+    }
+
+    var matchFormatDescription: String {
+        let mode = matchMode.rawValue
+        if sets > 1 {
+            return "\(mode) \(sets) Sets, \(legs) Legs"
+        } else if legs > 1 {
+            return "\(mode) \(legs) Legs"
+        }
+        return ""
+    }
 
     init() {
         let defaults = UserDefaults.standard
@@ -72,6 +119,17 @@ final class GameViewModel: ObservableObject {
         }
         if let savedOut = defaults.string(forKey: gameOutKey), let out = GameOut(rawValue: savedOut) {
             self.gameOut = out
+        }
+        if let savedMode = defaults.string(forKey: matchModeKey), let mode = MatchMode(rawValue: savedMode) {
+            self.matchMode = mode
+        }
+        if defaults.object(forKey: legsKey) != nil {
+            let savedLegs = defaults.integer(forKey: legsKey)
+            if savedLegs >= 1 { self.legs = savedLegs }
+        }
+        if defaults.object(forKey: setsKey) != nil {
+            let savedSets = defaults.integer(forKey: setsKey)
+            if savedSets >= 1 { self.sets = savedSets }
         }
 
         // Load saved player names if available (preserves order)
@@ -104,6 +162,30 @@ final class GameViewModel: ObservableObject {
             .sink { [weak self] names in
                 guard let self else { return }
                 defaults.set(names, forKey: self.playerNamesKey)
+            }
+            .store(in: &cancellables)
+
+        $matchMode
+            .removeDuplicates()
+            .sink { [weak self] mode in
+                guard let self else { return }
+                defaults.set(mode.rawValue, forKey: self.matchModeKey)
+            }
+            .store(in: &cancellables)
+
+        $legs
+            .removeDuplicates()
+            .sink { [weak self] val in
+                guard let self else { return }
+                defaults.set(val, forKey: self.legsKey)
+            }
+            .store(in: &cancellables)
+
+        $sets
+            .removeDuplicates()
+            .sink { [weak self] val in
+                guard let self else { return }
+                defaults.set(val, forKey: self.setsKey)
             }
             .store(in: &cancellables)
     }
@@ -141,18 +223,21 @@ final class GameViewModel: ObservableObject {
 
     func startGame() {
         guard canStart else { return }
-        // Determine who starts this game. If we're coming from a finished game,
-        // advance to the next player in order; otherwise, keep the current starter.
+        // Rotate starting player only when starting a new match from a completed one
         let nextStart: Int
-        switch phase {
-        case .finished:
+        if case .finished(.matchWon) = phase {
             nextStart = (startingPlayerIndex + 1) % max(players.count, 1)
-        default:
+        } else {
             nextStart = startingPlayerIndex
         }
 
         startingPlayerIndex = nextStart
+        legStartingPlayerIndex = nextStart
         currentPlayerIndex = nextStart
+
+        // Initialize match state
+        legsWon = Array(repeating: 0, count: players.count)
+        setsWon = Array(repeating: 0, count: players.count)
 
         actionStack.removeAll()
         scoreInput = ""
@@ -163,12 +248,36 @@ final class GameViewModel: ObservableObject {
         phase = .inGame
     }
 
+    func startNewLeg() {
+        // Rotate the leg starting player
+        legStartingPlayerIndex = (legStartingPlayerIndex + 1) % max(players.count, 1)
+        currentPlayerIndex = legStartingPlayerIndex
+
+        // Reset leg-level state only
+        actionStack.removeAll()
+        scoreInput = ""
+        for i in players.indices {
+            players[i].remaining = startScore
+            players[i].turns.removeAll()
+        }
+        phase = .inGame
+    }
+
+    func startNewSet() {
+        // Reset legs counters for the new set
+        legsWon = Array(repeating: 0, count: players.count)
+        startNewLeg()
+    }
+
     func resetToSetup() {
         phase = .setup
         scoreInput = ""
         actionStack.removeAll()
         currentPlayerIndex = 0
         startingPlayerIndex = 0
+        legStartingPlayerIndex = 0
+        legsWon = []
+        setsWon = []
         for i in players.indices {
             players[i].remaining = startScore
             players[i].turns.removeAll()
@@ -557,7 +666,7 @@ final class GameViewModel: ObservableObject {
         scoreInput = ""
 
         if after == 0 {
-            phase = .finished(winnerIndex: currentPlayerIndex)
+            phase = .awaitingFinishDarts(winnerIndex: currentPlayerIndex)
             return
         }
 
@@ -580,10 +689,93 @@ final class GameViewModel: ObservableObject {
         currentPlayerIndex = idx
         scoreInput = ""
 
-        // if we were finished, go back to in-game
-        if case .finished = phase {
+        // Revert awaiting or finished states
+        switch phase {
+        case .awaitingFinishDarts:
             phase = .inGame
+        case .finished(let reason):
+            switch reason {
+            case .matchWon(let winnerIndex):
+                setsWon[winnerIndex] -= 1
+                legsWon[winnerIndex] -= 1
+            case .setWon(let winnerIndex):
+                setsWon[winnerIndex] -= 1
+                legsWon[winnerIndex] -= 1
+            case .legWon(let winnerIndex):
+                legsWon[winnerIndex] -= 1
+            }
+            phase = .inGame
+        default:
+            break
         }
+    }
+
+    // MARK: - Finishing Darts
+
+    func confirmFinishDarts(_ count: Int) {
+        guard case .awaitingFinishDarts(let winnerIndex) = phase else { return }
+        // Set finishDarts on the winning turn (first in the array, since turns are inserted at 0)
+        if !players[winnerIndex].turns.isEmpty {
+            players[winnerIndex].turns[0].finishDarts = count
+        }
+        handleLegWon(by: winnerIndex)
+    }
+
+    // MARK: - Leg Stats
+
+    func totalDarts(for playerIndex: Int) -> Int {
+        let turns = players[playerIndex].turns
+        var darts = 0
+        for turn in turns {
+            if let finish = turn.finishDarts {
+                darts += finish
+            } else {
+                darts += 3
+            }
+        }
+        return darts
+    }
+
+    func legAverage(for playerIndex: Int) -> Double {
+        let turns = players[playerIndex].turns
+        guard !turns.isEmpty else { return 0 }
+        let totalScored = turns.reduce(0) { $0 + ($1.isBust ? 0 : $1.entered) }
+        return Double(totalScored) / Double(turns.count)
+    }
+
+    func legAverageText(for playerIndex: Int) -> String {
+        String(format: "%.1f", legAverage(for: playerIndex))
+    }
+
+    func topScore(for playerIndex: Int) -> Int {
+        players[playerIndex].turns
+            .filter { !$0.isBust }
+            .map(\.entered)
+            .max() ?? 0
+    }
+
+    // MARK: - Leg / Set / Match Cascade
+
+    private func handleLegWon(by playerIndex: Int) {
+        legsWon[playerIndex] += 1
+
+        if legsWon[playerIndex] >= legsToWinSet {
+            handleSetWon(by: playerIndex)
+            return
+        }
+
+        phase = .finished(.legWon(winnerIndex: playerIndex))
+    }
+
+    private func handleSetWon(by playerIndex: Int) {
+        setsWon[playerIndex] += 1
+
+        if setsWon[playerIndex] >= setsToWinMatch {
+            phase = .finished(.matchWon(winnerIndex: playerIndex))
+            return
+        }
+
+        phase = .finished(.setWon(winnerIndex: playerIndex))
     }
 
     // MARK: - Rules
@@ -694,12 +886,34 @@ struct ContentView: View {
                 SetupView(vm: vm, showSettings: $showSettings)
             case .inGame:
                 GameView(vm: vm, showSettings: $showSettings)
-            case .finished(let winnerIndex):
+            case .awaitingFinishDarts(let winnerIndex):
+                GameView(vm: vm, showSettings: $showSettings)
+                    .overlay {
+                        FinishDartsPrompt(
+                            winnerName: vm.players[winnerIndex].name,
+                            onSelect: { darts in vm.confirmFinishDarts(darts) }
+                        )
+                    }
+            case .finished(let reason):
                 GameView(vm: vm, showSettings: $showSettings)
                     .overlay {
                         FinishedOverlay(
-                            winnerName: vm.players[winnerIndex].name,
-                            onNewGame: { vm.startGame() },
+                            reason: reason,
+                            players: vm.players,
+                            legsWon: vm.legsWon,
+                            setsWon: vm.setsWon,
+                            showSets: vm.sets > 1,
+                            showScoreline: vm.legs > 1 || vm.sets > 1,
+                            playerDarts: vm.players.indices.map { vm.totalDarts(for: $0) },
+                            playerAverage: vm.players.indices.map { vm.legAverageText(for: $0) },
+                            playerTopScore: vm.players.indices.map { vm.topScore(for: $0) },
+                            onContinue: {
+                                switch reason {
+                                case .legWon: vm.startNewLeg()
+                                case .setWon: vm.startNewSet()
+                                case .matchWon: vm.startGame()
+                                }
+                            },
                             onBackToSetup: { vm.resetToSetup() }
                         )
                     }
@@ -734,7 +948,18 @@ private struct SetupView: View {
                     Text(GameViewModel.GameOut.double.rawValue).tag(GameViewModel.GameOut.double)
                     Text(GameViewModel.GameOut.master.rawValue).tag(GameViewModel.GameOut.master)
                 }
+            }
 
+            Section("Format") {
+                Picker("Mode", selection: $vm.matchMode) {
+                    ForEach(GameViewModel.MatchMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Stepper("Legs: \(vm.legs)", value: $vm.legs, in: 1...13)
+                Stepper("Sets: \(vm.sets)", value: $vm.sets, in: 1...13)
             }
 
             Section("Players") {
@@ -848,6 +1073,13 @@ private struct GameView: View {
 
     var body: some View {
         VStack(spacing: 18) {
+            if !vm.matchFormatDescription.isEmpty {
+                Text(vm.matchFormatDescription)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
             scoreTiles
 
             Spacer()
@@ -892,48 +1124,53 @@ private struct GameView: View {
     // MARK: - Top Tiles
 
     private var scoreTiles: some View {
-        GeometryReader { geo in
-            let containerWidth = geo.size.width
-            let tileWidth = playerTileWidth(for: containerWidth)
-
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(vm.players.indices, id: \.self) { i in
-                            let p = vm.players[i]
-                            let checkoutParts = vm.finishSegments(for: p.remaining)
-                            let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
-                            PlayerTile(
-                                name: p.name,
-                                averageText: vm.averageText(for: p),
-                                checkoutText: checkoutText,
-                                remaining: p.remaining,
-                                isActive: i == vm.currentPlayerIndex
-                            )
-                            .frame(width: tileWidth)
-                            .id(i)
-                        }
+        Group {
+            if vm.players.count <= 2 {
+                HStack(spacing: 12) {
+                    ForEach(vm.players.indices, id: \.self) { i in
+                        playerTile(for: i)
                     }
-                    .padding(.horizontal)
                 }
-                .onChange(of: vm.currentPlayerIndex) { _, newIndex in
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(newIndex, anchor: .center)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(vm.players.indices, id: \.self) { i in
+                                playerTile(for: i)
+                                    .containerRelativeFrame(.horizontal, count: 43, span: 20, spacing: 0)
+                            }
+                        }
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.viewAligned)
+                    .contentMargins(.horizontal, 16)
+                    .padding(.horizontal, -16)
+                    .onChange(of: vm.currentPlayerIndex) { _, newIndex in
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(newIndex, anchor: .center)
+                        }
                     }
                 }
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, -16)
     }
 
-    private func playerTileWidth(for containerWidth: CGFloat) -> CGFloat {
-        let tileSpacing: CGFloat = 12
-        if vm.players.count <= 2 {
-            return (containerWidth - tileSpacing) / 2
-        } else {
-            return (containerWidth - tileSpacing) / 2.15
-        }
+    private func playerTile(for i: Int) -> some View {
+        let p = vm.players[i]
+        let checkoutParts = vm.finishSegments(for: p.remaining)
+        let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
+        return PlayerTile(
+            name: p.name,
+            averageText: vm.averageText(for: p),
+            checkoutText: checkoutText,
+            remaining: p.remaining,
+            isActive: i == vm.currentPlayerIndex,
+            legsWon: i < vm.legsWon.count ? vm.legsWon[i] : 0,
+            setsWon: i < vm.setsWon.count ? vm.setsWon[i] : 0,
+            showSets: vm.sets > 1,
+            showLegs: vm.legs > 1 || vm.sets > 1
+        )
+        .id(i)
     }
 
     private var scoreInputDisplay: some View {
@@ -1015,6 +1252,10 @@ private struct PlayerTile: View {
     let checkoutText: String?
     let remaining: Int
     let isActive: Bool
+    let legsWon: Int
+    let setsWon: Int
+    let showSets: Bool
+    let showLegs: Bool
 
     var body: some View {
         VStack(spacing: 6) {
@@ -1025,6 +1266,18 @@ private struct PlayerTile: View {
                 Text("Ø\(averageText)")
                     .font(.subheadline)
                     .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+            }
+
+            if showSets {
+                Text("Sets: \(setsWon) · Legs: \(legsWon)")
+                    .font(.subheadline)
+                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if showLegs {
+                Text("Legs: \(legsWon)")
+                    .font(.subheadline)
+                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Text(checkoutText ?? " ")
@@ -1101,17 +1354,16 @@ private struct KeyIconButton: View {
     }
 }
 
-private struct FinishedOverlay: View {
+private struct FinishDartsPrompt: View {
     let winnerName: String
-    let onNewGame: () -> Void
-    let onBackToSetup: () -> Void
+    let onSelect: (Int) -> Void
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.45).ignoresSafeArea()
 
             VStack(spacing: 14) {
-                Text("Winner")
+                Text("Finishing Dart?")
                     .font(.headline)
                     .foregroundStyle(.secondary)
 
@@ -1119,12 +1371,18 @@ private struct FinishedOverlay: View {
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
-                HStack(spacing: 10) {
-                    Button("New Game") { onNewGame() }
+                HStack(spacing: 12) {
+                    ForEach([1, 2, 3], id: \.self) { n in
+                        Button {
+                            onSelect(n)
+                        } label: {
+                            Text(n == 1 ? "1st" : n == 2 ? "2nd" : "3rd")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                        }
                         .buttonStyle(.borderedProminent)
-
-                    Button("Setup") { onBackToSetup() }
-                        .buttonStyle(.bordered)
+                    }
                 }
             }
             .padding(18)
@@ -1132,6 +1390,144 @@ private struct FinishedOverlay: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .padding()
         }
+    }
+}
+
+private struct FinishedOverlay: View {
+    let reason: GameViewModel.FinishReason
+    let players: [Player]
+    let legsWon: [Int]
+    let setsWon: [Int]
+    let showSets: Bool
+    let showScoreline: Bool
+    let playerDarts: [Int]
+    let playerAverage: [String]
+    let playerTopScore: [Int]
+    let onContinue: () -> Void
+    let onBackToSetup: () -> Void
+
+    private var winnerIndex: Int {
+        switch reason {
+        case .legWon(let i), .setWon(let i), .matchWon(let i): return i
+        }
+    }
+
+    private var headline: String {
+        switch reason {
+        case .legWon: return "Leg Won"
+        case .setWon: return "Set Won"
+        case .matchWon: return "Match Winner"
+        }
+    }
+
+    private var continueLabel: String {
+        switch reason {
+        case .legWon: return "Next Leg"
+        case .setWon: return "Next Set"
+        case .matchWon: return "New Match"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Text(headline)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                Text(players[winnerIndex].name)
+                    .font(.largeTitle)
+                    .fontWeight(.semibold)
+
+                // Leg stats for all players
+                VStack(spacing: 12) {
+                    ForEach(players.indices, id: \.self) { i in
+                        VStack(spacing: 6) {
+                            if players.count > 1 {
+                                Text(players[i].name)
+                                    .font(.subheadline)
+                                    .fontWeight(i == winnerIndex ? .semibold : .regular)
+                                    .foregroundStyle(i == winnerIndex ? .primary : .secondary)
+                            }
+                            HStack(spacing: 0) {
+                                statItem(label: "Darts", value: "\(playerDarts[i])")
+                                Divider().frame(height: 32)
+                                statItem(label: "Average", value: playerAverage[i])
+                                Divider().frame(height: 32)
+                                statItem(label: "Top Score", value: "\(playerTopScore[i])")
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+
+                // Buttons
+                VStack(spacing: 10) {
+                    Button {
+                        onContinue()
+                    } label: {
+                        Text(continueLabel)
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        onBackToSetup()
+                    } label: {
+                        Text("Quit")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                // Overall scoreline (only for multi-leg/set)
+                if showScoreline {
+                    Divider()
+
+                    VStack(spacing: 4) {
+                        ForEach(players.indices, id: \.self) { i in
+                            HStack {
+                                Text(players[i].name)
+                                    .fontWeight(i == winnerIndex ? .semibold : .regular)
+                                Spacer()
+                                if showSets {
+                                    Text("\(setsWon[i])S \(legsWon[i])L")
+                                        .monospacedDigit()
+                                } else {
+                                    Text("\(legsWon[i]) Legs")
+                                        .monospacedDigit()
+                                }
+                            }
+                            .font(.subheadline)
+                            .foregroundStyle(i == winnerIndex ? .primary : .secondary)
+                        }
+                    }
+                }
+            }
+            .padding(18)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding()
+        }
+    }
+
+    private func statItem(label: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
