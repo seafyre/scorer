@@ -16,5 +16,4 @@ The language can be changed in-app (Settings â†’ Language) or via iOS Settings â
 - Player statistics
 - Online games with friends with simple join code & accounts
 - More stats on game screen (e.g. first 9-dart-avg)
-- Add "Buy Me A Coffe Link"
 - Casual game modes, e.g. Around the World
