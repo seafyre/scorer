@@ -1027,7 +1027,7 @@ private struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Haptic Feedback") {
-                    Picker("Haptic Feedback", selection: $hapticsMode) {
+                    Picker("Intensity", selection: $hapticsMode) {
                         ForEach(hapticOptions, id: \.value) { option in
                             Text(option.title).tag(option.value)
                         }
@@ -1127,6 +1127,15 @@ private struct GameView: View {
         Group {
             if vm.players.count <= 2 {
                 HStack(spacing: 12) {
+                    ForEach(vm.players.indices, id: \.self) { i in
+                        playerTile(for: i)
+                    }
+                }
+            } else if vm.players.count <= 4 {
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                    spacing: 12
+                ) {
                     ForEach(vm.players.indices, id: \.self) { i in
                         playerTile(for: i)
                     }
@@ -1428,6 +1437,14 @@ private struct FinishedOverlay: View {
         }
     }
 
+    private var winnerDisplayName: String {
+        let name = players[winnerIndex].name
+        switch reason {
+        case .matchWon: return "🏆 \(name)"
+        case .legWon, .setWon: return name
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.45).ignoresSafeArea()
@@ -1437,7 +1454,7 @@ private struct FinishedOverlay: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
 
-                Text(players[winnerIndex].name)
+                Text(winnerDisplayName)
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
