@@ -10,3 +10,6 @@ xcuserdata/
 *.xcuserstate
 *.xcuserdata/
 
+# Claude
+CLAUDE.md
+
