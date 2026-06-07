@@ -1074,6 +1074,14 @@ private struct SettingsView: View {
                 Section("Links") {
                     Link("My Website", destination: URL(string: "https://nickringelmann.com")!)
                     Link("GitHub", destination: URL(string: "https://github.com/seafyre/scorer")!)
+                    Link(destination: URL(string: "https://liberapay.com/seafyre/donate")!) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Support my work")
+                            Text("🇪🇺 European buymeacoffee.com alternative")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .navigationTitle("Settings")
