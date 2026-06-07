@@ -1,5 +1,5 @@
 # Scorer – Your simple darts app
-This is a straight-forward darts application for iOS & iPadOS that natively implemented X01 scoring using Swift only for a simple and lightweight experience.
+This is a straight-forward darts application for iOS & iPadOS that natively implements X01 scoring in SwiftUI for a simple and lightweight experience.
 Developed by Nick Ringelmann (nickringelmann.com)
 
 ## To be developed
