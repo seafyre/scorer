@@ -100,11 +100,13 @@ final class GameViewModel: ObservableObject {
     }
 
     var matchFormatDescription: String {
-        let mode = matchMode.rawValue
+        let mode = NSLocalizedString(matchMode.rawValue, comment: "Match mode name")
         if sets > 1 {
-            return "\(mode) \(sets) Sets, \(legs) Legs"
+            let format = NSLocalizedString("%@ %lld Sets, %lld Legs", comment: "Match format description with mode, sets count, legs count")
+            return String(format: format, mode, sets, legs)
         } else if legs > 1 {
-            return "\(mode) \(legs) Legs"
+            let format = NSLocalizedString("%@ %lld Legs", comment: "Match format description with mode and legs count")
+            return String(format: format, mode, legs)
         }
         return ""
     }
@@ -1010,9 +1012,12 @@ private struct SetupView: View {
 
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("settings.hapticsMode") private var hapticsMode: String = "medium"
     @AppStorage("settings.theme") private var theme: String = "system"
+    @AppStorage("settings.language") private var language: String = "system"
+    @State private var showRestartAlert = false
 
     private let hapticOptions: [(title: String, value: String)] = [
         ("Off", "off"),
@@ -1021,6 +1026,12 @@ private struct SettingsView: View {
         ("Heavy", "heavy"),
         ("Soft", "soft"),
         ("Rigid", "rigid")
+    ]
+
+    private let languageOptions: [(title: String, value: String)] = [
+        ("System", "system"),
+        ("English", "en"),
+        ("Deutsch", "de")
     ]
 
     var body: some View {
@@ -1043,6 +1054,23 @@ private struct SettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
+                Section("Language") {
+                    Picker("Language", selection: Binding(
+                        get: { language },
+                        set: { newValue in
+                            guard newValue != language else { return }
+                            language = newValue
+                            applyLanguage(newValue)
+                            Haptics.selectionChanged()
+                            showRestartAlert = true
+                        }
+                    )) {
+                        ForEach(languageOptions, id: \.value) { option in
+                            Text(option.title).tag(option.value)
+                        }
+                    }
+                }
+
                 Section("Links") {
                     Link("My Website", destination: URL(string: "https://nickringelmann.com")!)
                     Link("GitHub", destination: URL(string: "https://github.com/seafyre/scorer")!)
@@ -1054,6 +1082,41 @@ private struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .alert("Language Changed", isPresented: $showRestartAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("The new language will take effect when you restart the app.")
+            }
+            .onAppear { syncLanguageFromSystem() }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active { syncLanguageFromSystem() }
+            }
+        }
+    }
+
+    private func applyLanguage(_ value: String) {
+        let defaults = UserDefaults.standard
+        if value == "system" {
+            defaults.removeObject(forKey: "AppleLanguages")
+        } else {
+            defaults.set([value], forKey: "AppleLanguages")
+        }
+    }
+
+    private func syncLanguageFromSystem() {
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        let appDefaults = UserDefaults.standard.persistentDomain(forName: bundleID)
+        let langs = appDefaults?["AppleLanguages"] as? [String]
+        guard let first = langs?.first else {
+            language = "system"
+            return
+        }
+        if first.hasPrefix("de") {
+            language = "de"
+        } else if first.hasPrefix("en") {
+            language = "en"
+        } else {
+            language = "system"
         }
     }
 }
