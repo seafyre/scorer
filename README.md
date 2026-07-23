@@ -1,6 +1,6 @@
 # Scorer
 
-Native X01 darts scorer for iPhone and iPad. Pure SwiftUI. No ads, no accounts, no setup beyond opening the app.
+Native X01 darts scorer for iPhone and iPad. Pure SwiftUI. No ads and no Scorer account.
 
 By Nick Ringelmann: [nickringelmann.com](https://nickringelmann.com) · [GitHub](https://github.com/seafyre/scorer) · [Support this project](https://liberapay.com/seafyre/donate)
 
@@ -23,6 +23,7 @@ By Nick Ringelmann: [nickringelmann.com](https://nickringelmann.com) · [GitHub]
 - Persistent player roster: save all your friends, toggle who plays each game
 - Add, rename, reorder, and delete roster entries inline
 - Player order can be reordered on the setup screen
+- Username onboarding for the main player used in online sessions
 
 ### Scoring
 - Number keypad for fast score entry
@@ -38,7 +39,14 @@ By Nick Ringelmann: [nickringelmann.com](https://nickringelmann.com) · [GitHub]
 - Scoreline displayed during multi-leg and multi-set matches
 - Records which dart (1st, 2nd, 3rd) the finishing throw was
 
+### Online Games
+- Host or join an online game from the setup screen
+- Six-digit numeric lobby codes
+- Host lobby with joined player list and start countdown
+- CloudKit-backed game sessions
+
 ### Settings
+- Main profile username for online games
 - Haptic feedback intensity: off, light, medium, heavy, soft, or rigid
 - Appearance: light, dark, or follow system
 - Language: English, German, or follow system (takes effect on restart)
@@ -61,6 +69,5 @@ Language can be changed in-app via Settings → Language, or in iOS Settings →
 - Player statistics across games
 - First 9-dart average and other in-game stats
 - Casual modes (Around the World, etc.)
-- Online games with join code
 
 ---
