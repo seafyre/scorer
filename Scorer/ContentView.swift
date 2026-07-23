@@ -976,63 +976,63 @@ private struct SetupView: View {
     @Binding var showSettings: Bool
 
     var body: some View {
-        List {
-            Section("Game") {
-                Picker("Start", selection: Binding(
-                    get: { vm.startScore },
-                    set: { vm.setStartScore($0) }
-                )) {
-                    Text("301").tag(301)
-                    Text("501").tag(501)
-                    Text("701").tag(701)
-                }
+        VStack(spacing: 0) {
+            List {
+                Section("Game") {
+                    Picker("Start", selection: Binding(
+                        get: { vm.startScore },
+                        set: { vm.setStartScore($0) }
+                    )) {
+                        Text("301").tag(301)
+                        Text("501").tag(501)
+                        Text("701").tag(701)
+                    }
 
-                Picker("Game Out", selection: $vm.gameOut) {
-                    Text(GameViewModel.GameOut.straight.rawValue).tag(GameViewModel.GameOut.straight)
-                    Text(GameViewModel.GameOut.double.rawValue).tag(GameViewModel.GameOut.double)
-                    Text(GameViewModel.GameOut.master.rawValue).tag(GameViewModel.GameOut.master)
-                }
-            }
-
-            Section("Format") {
-                Picker("Mode", selection: $vm.matchMode) {
-                    ForEach(GameViewModel.MatchMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
+                    Picker("Game Out", selection: $vm.gameOut) {
+                        Text(GameViewModel.GameOut.straight.rawValue).tag(GameViewModel.GameOut.straight)
+                        Text(GameViewModel.GameOut.double.rawValue).tag(GameViewModel.GameOut.double)
+                        Text(GameViewModel.GameOut.master.rawValue).tag(GameViewModel.GameOut.master)
                     }
                 }
-                .pickerStyle(.segmented)
 
-                Stepper("Legs: \(vm.legs)", value: $vm.legs, in: 1...13)
-                Stepper("Sets: \(vm.sets)", value: $vm.sets, in: 1...13)
-            }
-
-            Section("Players") {
-                ForEach($vm.roster) { $entry in
-                    HStack(spacing: 12) {
-                        Button {
-                            vm.toggleRosterEntry(id: entry.id)
-                            Haptics.selectionChanged()
-                        } label: {
-                            Image(systemName: entry.isEnabled ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(entry.isEnabled ? Color.accentColor : Color.secondary)
-                                .font(.title3)
+                Section("Format") {
+                    Picker("Mode", selection: $vm.matchMode) {
+                        ForEach(GameViewModel.MatchMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
                         }
-                        .buttonStyle(.plain)
-
-                        TextField("Name", text: $entry.name)
-                            .textInputAutocapitalization(.words)
                     }
-                }
-                .onDelete(perform: vm.removeRosterEntries)
-                .onMove(perform: vm.moveRosterEntries)
+                    .pickerStyle(.segmented)
 
-                Button("Add Player") {
-                    vm.addRosterEntry()
+                    Stepper("Legs: \(vm.legs)", value: $vm.legs, in: 1...13)
+                    Stepper("Sets: \(vm.sets)", value: $vm.sets, in: 1...13)
+                }
+
+                Section("Players") {
+                    ForEach($vm.roster) { $entry in
+                        HStack(spacing: 12) {
+                            Button {
+                                vm.toggleRosterEntry(id: entry.id)
+                                Haptics.selectionChanged()
+                            } label: {
+                                Image(systemName: entry.isEnabled ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(entry.isEnabled ? Color.accentColor : Color.secondary)
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.plain)
+
+                            TextField("Name", text: $entry.name)
+                                .textInputAutocapitalization(.words)
+                        }
+                    }
+                    .onDelete(perform: vm.removeRosterEntries)
+                    .onMove(perform: vm.moveRosterEntries)
+
+                    Button("Add Player") {
+                        vm.addRosterEntry()
+                    }
                 }
             }
 
-        }
-        .safeAreaInset(edge: .bottom) {
             Button {
                 vm.startGame()
             } label: {
@@ -1044,7 +1044,9 @@ private struct SetupView: View {
             .glassProminentButtonStyle()
             .disabled(!vm.canStart)
             .padding(.horizontal)
+            .padding(.top, 4)
             .padding(.bottom, 8)
+            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
         }
         .navigationTitle("Scorer 🎯 ")
         .navigationBarTitleDisplayMode(.inline)
