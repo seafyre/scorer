@@ -874,6 +874,28 @@ struct ThemeApplier {
     }
 }
 
+// MARK: - Button Style Helpers
+
+private extension View {
+    @ViewBuilder
+    func glassButtonStyle() -> some View {
+        if #available(iOS 26, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    func glassProminentButtonStyle() -> some View {
+        if #available(iOS 26, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
 // MARK: - Views
 
 struct ContentView: View {
@@ -987,7 +1009,7 @@ private struct SetupView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
             }
-            .buttonStyle(.glassProminent)
+            .glassProminentButtonStyle()
             .disabled(!vm.canStart)
             .padding(.horizontal)
             .padding(.bottom, 8)
@@ -1402,7 +1424,7 @@ private struct KeyButton: View {
                 .frame(height: height)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.glass)
+        .glassButtonStyle()
     }
 }
 
@@ -1430,7 +1452,7 @@ private struct KeyIconButton: View {
                 .contentShape(Rectangle())
         }
         .tint(background)
-        .buttonStyle(.glassProminent)
+        .glassProminentButtonStyle()
     }
 }
 
