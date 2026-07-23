@@ -46,6 +46,7 @@ final class GameViewModel: ObservableObject {
     private let matchModeKey = "settings.matchMode"
     private let legsKey = "settings.legs"
     private let setsKey = "settings.sets"
+    private let mainPlayerNameKey = "online.mainPlayerName"
 
     enum Phase: Equatable {
         case setup
@@ -91,6 +92,25 @@ final class GameViewModel: ObservableObject {
     @Published private(set) var legStartingPlayerIndex: Int = 0
     @Published private(set) var legsWon: [Int] = []
     @Published private(set) var setsWon: [Int] = []
+    @Published var onlineManager: OnlineGameManager?
+    @Published private(set) var localPlayerIndex: Int?
+    private var onlineStateVersion = 0
+
+    var isOnlineGame: Bool {
+        onlineManager != nil
+    }
+
+    var canEnterScore: Bool {
+        guard let localPlayerIndex else { return phase == .inGame }
+        return phase == .inGame && currentPlayerIndex == localPlayerIndex
+    }
+
+    var waitingPlayerName: String? {
+        guard isOnlineGame, !canEnterScore, phase == .inGame, players.indices.contains(currentPlayerIndex) else {
+            return nil
+        }
+        return players[currentPlayerIndex].name
+    }
 
     var legsToWinSet: Int {
         switch matchMode {
@@ -147,11 +167,11 @@ final class GameViewModel: ObservableObject {
             self.roster = saved
         } else if let names = defaults.array(forKey: playerNamesKey) as? [String], !names.isEmpty {
             self.roster = names.map { RosterEntry(name: $0, isEnabled: true) }
+        } else if let mainPlayerName = defaults.string(forKey: mainPlayerNameKey),
+                  !mainPlayerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.roster = [RosterEntry(name: mainPlayerName, isEnabled: true)]
         } else {
-            self.roster = [
-                RosterEntry(name: "Player 1", isEnabled: true),
-                RosterEntry(name: "Player 2", isEnabled: true)
-            ]
+            self.roster = []
         }
 
         // Persist settings and names whenever they change
@@ -229,6 +249,12 @@ final class GameViewModel: ObservableObject {
         roster.append(RosterEntry(name: "Player \(roster.count + 1)", isEnabled: true))
     }
 
+    func setInitialRosterPlayerName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        roster = [RosterEntry(name: trimmed, isEnabled: true)]
+    }
+
     func removeRosterEntries(at offsets: IndexSet) {
         roster.remove(atOffsets: offsets)
     }
@@ -270,6 +296,40 @@ final class GameViewModel: ObservableObject {
         phase = .inGame
     }
 
+    func configureOnlineMatch(localName: String, remoteName: String, localPlayerIndex: Int, settings: GameSettings) {
+        self.onlineStateVersion = 0
+        self.localPlayerIndex = localPlayerIndex
+        startScore = settings.startScore
+        gameOut = settings.gameOut
+        matchMode = settings.matchMode
+        legs = settings.legs
+        sets = settings.sets
+
+        let localPlayer = Player(name: localName, remaining: settings.startScore, turns: [])
+        let remotePlayer = Player(name: remoteName, remaining: settings.startScore, turns: [])
+        players = localPlayerIndex == 0 ? [localPlayer, remotePlayer] : [remotePlayer, localPlayer]
+        currentPlayerIndex = 0
+        startingPlayerIndex = 0
+        legStartingPlayerIndex = 0
+        legsWon = Array(repeating: 0, count: 2)
+        setsWon = Array(repeating: 0, count: 2)
+        actionStack.removeAll()
+        scoreInput = ""
+    }
+
+    func startOnlineMatch() {
+        guard players.count == 2 else { return }
+        currentPlayerIndex = 0
+        startingPlayerIndex = 0
+        legStartingPlayerIndex = 0
+        legsWon = Array(repeating: 0, count: players.count)
+        setsWon = Array(repeating: 0, count: players.count)
+        actionStack.removeAll()
+        scoreInput = ""
+        phase = .inGame
+        publishOnlineState()
+    }
+
     func startNewLeg() {
         // Rotate the leg starting player
         legStartingPlayerIndex = (legStartingPlayerIndex + 1) % max(players.count, 1)
@@ -283,6 +343,7 @@ final class GameViewModel: ObservableObject {
             players[i].turns.removeAll()
         }
         phase = .inGame
+        publishOnlineState()
     }
 
     func startNewSet() {
@@ -292,6 +353,10 @@ final class GameViewModel: ObservableObject {
     }
 
     func resetToSetup() {
+        onlineManager?.disconnect()
+        onlineManager = nil
+        localPlayerIndex = nil
+        onlineStateVersion = 0
         phase = .setup
         scoreInput = ""
         actionStack.removeAll()
@@ -317,6 +382,7 @@ final class GameViewModel: ObservableObject {
     }
 
     func appendDigit(_ digit: Int) {
+        guard canEnterScore else { return }
         guard (0...9).contains(digit) else { return }
         if scoreInput == "0" { scoreInput = "" }
         if scoreInput.count >= 3 { return } // max 180
@@ -324,11 +390,13 @@ final class GameViewModel: ObservableObject {
     }
 
     func deleteDigit() {
+        guard canEnterScore else { return }
         guard !scoreInput.isEmpty else { return }
         scoreInput.removeLast()
     }
 
     func clearInput() {
+        guard canEnterScore else { return }
         scoreInput = ""
     }
 
@@ -672,6 +740,7 @@ final class GameViewModel: ObservableObject {
 
     func submitTurn() {
         guard phase == .inGame else { return }
+        guard canEnterScore else { return }
         guard let entered = Int(scoreInput), (0...180).contains(entered) else { return }
 
         let before = players[currentPlayerIndex].remaining
@@ -689,14 +758,17 @@ final class GameViewModel: ObservableObject {
 
         if after == 0 {
             phase = .awaitingFinishDarts(winnerIndex: currentPlayerIndex)
+            publishOnlineState()
             return
         }
 
         // next player
         currentPlayerIndex = (currentPlayerIndex + 1) % players.count
+        publishOnlineState()
     }
 
     func undo() {
+        guard !isOnlineGame else { return }
         guard let last = actionStack.popLast() else { return }
 
         // restore
@@ -736,11 +808,124 @@ final class GameViewModel: ObservableObject {
 
     func confirmFinishDarts(_ count: Int) {
         guard case .awaitingFinishDarts(let winnerIndex) = phase else { return }
+        if let localPlayerIndex, winnerIndex != localPlayerIndex { return }
         // Set finishDarts on the winning turn (first in the array, since turns are inserted at 0)
         if !players[winnerIndex].turns.isEmpty {
             players[winnerIndex].turns[0].finishDarts = count
         }
         handleLegWon(by: winnerIndex)
+        publishOnlineState()
+    }
+
+    func continueAfterFinish(_ reason: FinishReason) {
+        if let localPlayerIndex {
+            let winnerIndex: Int
+            switch reason {
+            case .legWon(let index), .setWon(let index), .matchWon(let index):
+                winnerIndex = index
+            }
+            guard winnerIndex == localPlayerIndex else { return }
+        }
+
+        switch reason {
+        case .legWon:
+            startNewLeg()
+        case .setWon:
+            startNewSet()
+        case .matchWon:
+            if isOnlineGame {
+                startOnlineMatch()
+            } else {
+                startGame()
+            }
+        }
+    }
+
+    func makeOnlineState() -> OnlineGameState {
+        OnlineGameState(
+            version: onlineStateVersion,
+            currentPlayerIndex: currentPlayerIndex,
+            startingPlayerIndex: startingPlayerIndex,
+            legStartingPlayerIndex: legStartingPlayerIndex,
+            players: players.map { player in
+                OnlinePlayerState(
+                    name: player.name,
+                    remaining: player.remaining,
+                    turns: player.turns.map { turn in
+                        OnlineTurn(
+                            entered: turn.entered,
+                            before: turn.before,
+                            after: turn.after,
+                            isBust: turn.isBust,
+                            finishDarts: turn.finishDarts,
+                            createdAt: turn.createdAt
+                        )
+                    }
+                )
+            },
+            legsWon: legsWon,
+            setsWon: setsWon,
+            phaseTag: phase.onlineTag,
+            actionStack: actionStack.map { action in
+                OnlineGameAction(
+                    playerIndex: action.playerIndex,
+                    turn: OnlineTurn(
+                        entered: action.turn.entered,
+                        before: action.turn.before,
+                        after: action.turn.after,
+                        isBust: action.turn.isBust,
+                        finishDarts: action.turn.finishDarts,
+                        createdAt: action.turn.createdAt
+                    )
+                )
+            }
+        )
+    }
+
+    func applyOnlineState(_ state: OnlineGameState) {
+        guard state.version > onlineStateVersion else { return }
+        onlineStateVersion = state.version
+        currentPlayerIndex = state.currentPlayerIndex
+        startingPlayerIndex = state.startingPlayerIndex
+        legStartingPlayerIndex = state.legStartingPlayerIndex
+        players = state.players.map { player in
+            Player(
+                name: player.name,
+                remaining: player.remaining,
+                turns: player.turns.map { turn in
+                    var localTurn = Turn(
+                        entered: turn.entered,
+                        before: turn.before,
+                        after: turn.after,
+                        isBust: turn.isBust
+                    )
+                    localTurn.finishDarts = turn.finishDarts
+                    return localTurn
+                }
+            )
+        }
+        legsWon = state.legsWon
+        setsWon = state.setsWon
+        actionStack = state.actionStack.map { action in
+            var turn = Turn(
+                entered: action.turn.entered,
+                before: action.turn.before,
+                after: action.turn.after,
+                isBust: action.turn.isBust
+            )
+            turn.finishDarts = action.turn.finishDarts
+            return GameAction(playerIndex: action.playerIndex, turn: turn)
+        }
+        scoreInput = ""
+        phase = Phase(onlineTag: state.phaseTag)
+    }
+
+    private func publishOnlineState() {
+        guard let onlineManager else { return }
+        let state = makeOnlineState()
+        Task {
+            try? await onlineManager.publishGameState(state)
+        }
     }
 
     // MARK: - Leg Stats
@@ -835,6 +1020,49 @@ final class GameViewModel: ObservableObject {
     }
 }
 
+private extension GameViewModel.Phase {
+    var onlineTag: String {
+        switch self {
+        case .setup:
+            return "setup"
+        case .inGame:
+            return "inGame"
+        case .awaitingFinishDarts(let winnerIndex):
+            return "awaitingFinish:\(winnerIndex)"
+        case .finished(.legWon(let winnerIndex)):
+            return "finished:leg:\(winnerIndex)"
+        case .finished(.setWon(let winnerIndex)):
+            return "finished:set:\(winnerIndex)"
+        case .finished(.matchWon(let winnerIndex)):
+            return "finished:match:\(winnerIndex)"
+        }
+    }
+
+    init(onlineTag: String) {
+        let parts = onlineTag.split(separator: ":").map(String.init)
+        switch parts.first {
+        case "inGame":
+            self = .inGame
+        case "awaitingFinish":
+            self = .awaitingFinishDarts(winnerIndex: Int(parts.dropFirst().first ?? "") ?? 0)
+        case "finished" where parts.count == 3:
+            let winnerIndex = Int(parts[2]) ?? 0
+            switch parts[1] {
+            case "leg":
+                self = .finished(.legWon(winnerIndex: winnerIndex))
+            case "set":
+                self = .finished(.setWon(winnerIndex: winnerIndex))
+            case "match":
+                self = .finished(.matchWon(winnerIndex: winnerIndex))
+            default:
+                self = .setup
+            }
+        default:
+            self = .setup
+        }
+    }
+}
+
 // MARK: - Haptics
 
 struct Haptics {
@@ -918,16 +1146,31 @@ private extension View {
 
 // MARK: - Views
 
+private enum OnlineLobbyMode: String, CaseIterable, Identifiable {
+    case host = "Host"
+    case join = "Join"
+
+    var id: String { rawValue }
+}
+
 struct ContentView: View {
     @StateObject private var vm = GameViewModel()
+    @StateObject private var onlineManager = OnlineGameManager()
     @State private var showSettings = false
+    @State private var onlineLobbyMode: OnlineLobbyMode?
+    @State private var onboardingName = ""
     @AppStorage("settings.theme") private var appTheme: String = "system"
+    @AppStorage("online.mainPlayerName") private var mainPlayerName: String = ""
 
     var body: some View {
         NavigationStack {
             switch vm.phase {
             case .setup:
-                SetupView(vm: vm, showSettings: $showSettings)
+                SetupView(
+                    vm: vm,
+                    showSettings: $showSettings,
+                    startOnlineLobby: { onlineLobbyMode = $0 }
+                )
             case .inGame:
                 GameView(vm: vm, showSettings: $showSettings)
             case .awaitingFinishDarts(let winnerIndex):
@@ -953,9 +1196,8 @@ struct ContentView: View {
                             playerTopScore: vm.players.indices.map { vm.topScore(for: $0) },
                             onContinue: {
                                 switch reason {
-                                case .legWon: vm.startNewLeg()
-                                case .setWon: vm.startNewSet()
-                                case .matchWon: vm.startGame()
+                                case .legWon, .setWon, .matchWon:
+                                    vm.continueAfterFinish(reason)
                                 }
                             },
                             onBackToSetup: { vm.resetToSetup() }
@@ -966,7 +1208,40 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { mainPlayerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            set: { _ in }
+        )) {
+            OnlineNameOnboardingView(name: $onboardingName) {
+                let trimmed = onboardingName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                mainPlayerName = trimmed
+                vm.setInitialRosterPlayerName(trimmed)
+            }
+        }
+        .sheet(item: $onlineLobbyMode) { mode in
+            OnlineLobbyView(
+                vm: vm,
+                manager: onlineManager,
+                mode: mode,
+                mainPlayerName: mainPlayerName,
+                isPresented: Binding(
+                    get: { onlineLobbyMode != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            onlineLobbyMode = nil
+                        }
+                    }
+                )
+            )
+        }
         .onAppear { ThemeApplier.apply(theme: appTheme) }
+        .onAppear {
+            onlineManager.attach(to: vm)
+            if onboardingName.isEmpty {
+                onboardingName = mainPlayerName
+            }
+        }
         .onChange(of: appTheme) { oldValue, newValue in ThemeApplier.apply(theme: newValue) }
     }
 }
@@ -974,6 +1249,7 @@ struct ContentView: View {
 private struct SetupView: View {
     @ObservedObject var vm: GameViewModel
     @Binding var showSettings: Bool
+    let startOnlineLobby: (OnlineLobbyMode) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1004,7 +1280,9 @@ private struct SetupView: View {
                     .pickerStyle(.segmented)
 
                     Stepper("Legs: \(vm.legs)", value: $vm.legs, in: 1...13)
+                        .onChange(of: vm.legs) { Haptics.selectionChanged() }
                     Stepper("Sets: \(vm.sets)", value: $vm.sets, in: 1...13)
+                        .onChange(of: vm.sets) { Haptics.selectionChanged() }
                 }
 
                 Section("Players") {
@@ -1033,16 +1311,42 @@ private struct SetupView: View {
                 }
             }
 
-            Button {
-                vm.startGame()
-            } label: {
-                Text("Start Game")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+            HStack(spacing: 10) {
+                Menu {
+                    Button {
+                        startOnlineLobby(.join)
+                    } label: {
+                        Label("Join", systemImage: "person.2.wave.2")
+                    }
+
+                    Button {
+                        startOnlineLobby(.host)
+                    } label: {
+                        Label("Host", systemImage: "person.2.badge.plus")
+                    }
+                } label: {
+                    Label("Online Game", systemImage: "network")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .glassButtonStyle()
+
+                Button {
+                    vm.startGame()
+                } label: {
+                    Text("Start Game")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                }
+                .glassProminentButtonStyle()
+                .disabled(!vm.canStart)
             }
-            .glassProminentButtonStyle()
-            .disabled(!vm.canStart)
             .padding(.horizontal)
             .padding(.top, 4)
             .padding(.bottom, 8)
@@ -1066,6 +1370,377 @@ private struct SetupView: View {
     }
 }
 
+private struct OnlineNameOnboardingView: View {
+    @Binding var name: String
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 64))
+                    .foregroundStyle(.tint)
+                Text("Welcome to Scorer")
+                    .font(.largeTitle.bold())
+                Text("Enter a username to get started. You can change this later in Settings.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            Spacer()
+            TextField("Username", text: $name)
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .onSubmit(onSave)
+                .padding()
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+            Spacer()
+            Button(action: onSave) {
+                Text("Save Username")
+                    .frame(maxWidth: .infinity)
+            }
+            .glassProminentButtonStyle()
+            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal)
+            .padding(.bottom, 32)
+        }
+    }
+}
+
+private struct OnlineLobbyView: View {
+    @ObservedObject var vm: GameViewModel
+    @ObservedObject var manager: OnlineGameManager
+    let mode: OnlineLobbyMode
+    let mainPlayerName: String
+    @Binding var isPresented: Bool
+
+    @State private var joinCode = ""
+    @State private var errorMessage: String?
+    @State private var isWorking = false
+    @State private var countdownRemaining: Int?
+    @State private var countdownTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch mode {
+                case .host:
+                    VStack(spacing: 0) {
+                        Form {
+                            hostSection
+
+                            if let errorMessage {
+                                Section {
+                                    Text(errorMessage)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+
+                        hostStartButton
+                    }
+                case .join:
+                    joinLobbyView
+                }
+            }
+            .navigationTitle(mode == .host ? "Host Game" : "Join Game")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        cancelCountdown()
+                        manager.disconnect()
+                        vm.onlineManager = nil
+                        isPresented = false
+                    }
+                }
+            }
+            .task {
+                if mode == .host {
+                    createHostedGameIfNeeded()
+                }
+                await pollWhileHosting()
+            }
+            .onChange(of: vm.phase) { _, phase in
+                if phase != .setup {
+                    isPresented = false
+                }
+            }
+            .onDisappear {
+                cancelCountdown()
+            }
+        }
+    }
+
+    private var joinLobbyView: some View {
+        VStack(spacing: 0) {
+            if let errorMessage {
+                Form {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+                .frame(maxHeight: 120)
+            }
+
+            if case .active(.guest) = manager.status {
+                Label("Waiting for host to start...", systemImage: "hourglass")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.top)
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .center, spacing: 10) {
+                Text("Input the lobby code")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                joinCodeInputPanel
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 20)
+        }
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+    }
+
+    private var joinCodeInputPanel: some View {
+        VStack(spacing: 10) {
+            Text(joinCodeDisplay)
+                .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .accessibilityLabel("Lobby Code")
+                .accessibilityValue(joinCode.isEmpty ? "Empty" : joinCode)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 3), spacing: 10) {
+                ForEach(1...9, id: \.self) { number in
+                    KeyButton(title: "\(number)", height: 48) {
+                        appendJoinCodeDigit(number)
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                KeyIconButton(systemName: "delete.left", background: Color(.systemGray3), height: 48) {
+                    deleteJoinCodeDigit()
+                }
+                .disabled(joinCode.isEmpty)
+
+                KeyButton(title: "0", height: 48) {
+                    appendJoinCodeDigit(0)
+                }
+
+                KeyIconButton(systemName: "chevron.right", background: .blue, height: 48) {
+                    joinHostedGame()
+                }
+                .disabled(joinCode.count != 6 || isWorking)
+            }
+        }
+        .disabled(isWorking)
+        .padding(.vertical, 18)
+        .padding(.horizontal, 12)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 28))
+    }
+
+    private var hostSection: some View {
+        Section {
+            switch manager.status {
+            case .hosting(let code):
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(code)
+                        .font(.system(size: 42, weight: .bold, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .center)
+
+                    Button {
+                        UIPasteboard.general.string = code
+                    } label: {
+                        Label("Copy Code", systemImage: "doc.on.doc")
+                    }
+                }
+
+                playerList
+
+                if !hasEnoughPlayers {
+                    Label("Waiting for opponent...", systemImage: "hourglass")
+                        .foregroundStyle(.secondary)
+                }
+
+            default:
+                Label("Creating lobby...", systemImage: "hourglass")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Your Lobby")
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private var playerList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(localPlayerDisplayName, systemImage: "person.fill")
+
+            if !manager.remotePlayerName.isEmpty {
+                Label(manager.remotePlayerName, systemImage: "person.fill.checkmark")
+            }
+        }
+    }
+
+    private var localPlayerDisplayName: String {
+        let format = NSLocalizedString("%@ (You)", comment: "Player list label for the local player in an online lobby")
+        return String(format: format, mainPlayerName)
+    }
+
+    private var hostStartButton: some View {
+        Button {
+            if countdownRemaining == nil {
+                startCountdown()
+            } else {
+                cancelCountdown()
+            }
+        } label: {
+            Text(hostStartButtonTitle)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+        }
+        .glassProminentButtonStyle()
+        .tint(countdownRemaining == nil ? .blue : Color(.systemGray3))
+        .disabled(!hasEnoughPlayers || isWorking)
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
+    }
+
+    private var hostStartButtonTitle: String {
+        if let countdownRemaining {
+            return "\(countdownRemaining)s – click to cancel"
+        }
+        return "Start Game"
+    }
+
+    private var hasEnoughPlayers: Bool {
+        !manager.remotePlayerName.isEmpty
+    }
+
+    private func createHostedGameIfNeeded() {
+        guard case .idle = manager.status else { return }
+        createHostedGame()
+    }
+
+    private func startCountdown() {
+        guard hasEnoughPlayers, countdownRemaining == nil else { return }
+        countdownRemaining = 5
+        countdownTask?.cancel()
+        countdownTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let remaining = countdownRemaining else { return }
+                    if remaining <= 1 {
+                        countdownRemaining = nil
+                        startHostedGame()
+                    } else {
+                        countdownRemaining = remaining - 1
+                    }
+                }
+            }
+        }
+    }
+
+    private func cancelCountdown() {
+        countdownTask?.cancel()
+        countdownTask = nil
+        countdownRemaining = nil
+    }
+
+    private var joinCodeDisplay: String {
+        joinCode.padding(toLength: 6, withPad: "·", startingAt: 0)
+    }
+
+    private func appendJoinCodeDigit(_ digit: Int) {
+        guard (0...9).contains(digit), joinCode.count < 6 else { return }
+        joinCode.append(String(digit))
+    }
+
+    private func deleteJoinCodeDigit() {
+        guard !joinCode.isEmpty else { return }
+        joinCode.removeLast()
+    }
+
+    private func createHostedGame() {
+        isWorking = true
+        errorMessage = nil
+        vm.onlineManager = manager
+        manager.attach(to: vm)
+        Task {
+            do {
+                _ = try await manager.createSession(
+                    hostName: mainPlayerName,
+                    settings: GameSettings(
+                        startScore: vm.startScore,
+                        gameOut: vm.gameOut,
+                        matchMode: vm.matchMode,
+                        legs: vm.legs,
+                        sets: vm.sets
+                    )
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isWorking = false
+        }
+    }
+
+    private func joinHostedGame() {
+        isWorking = true
+        errorMessage = nil
+        vm.onlineManager = manager
+        manager.attach(to: vm)
+        Task {
+            do {
+                try await manager.joinSession(code: joinCode, guestName: mainPlayerName)
+            } catch {
+                vm.onlineManager = nil
+                errorMessage = error.localizedDescription
+            }
+            isWorking = false
+        }
+    }
+
+    private func startHostedGame() {
+        isWorking = true
+        errorMessage = nil
+        Task {
+            do {
+                try await manager.startHostedGame(hostName: mainPlayerName)
+                isPresented = false
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isWorking = false
+        }
+    }
+
+    private func pollWhileHosting() async {
+        while !Task.isCancelled {
+            if case .hosting = manager.status {
+                await manager.refreshFromCloud()
+            }
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+}
+
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -1073,6 +1748,7 @@ private struct SettingsView: View {
     @AppStorage("settings.hapticsMode") private var hapticsMode: String = "medium"
     @AppStorage("settings.theme") private var theme: String = "system"
     @AppStorage("settings.language") private var language: String = "system"
+    @AppStorage("online.mainPlayerName") private var mainPlayerName: String = ""
     @State private var showRestartAlert = false
 
     private let hapticOptions: [(title: String, value: String)] = [
@@ -1093,6 +1769,15 @@ private struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    TextField("Name", text: $mainPlayerName)
+                        .textInputAutocapitalization(.words)
+                } header: {
+                    Text("Main Profile/Username")
+                } footer: {
+                    Text("This user is used for online games and acts as your main profile.")
+                }
+
                 Section("Haptic Feedback") {
                     Picker("Intensity", selection: $hapticsMode) {
                         ForEach(hapticOptions, id: \.value) { option in
@@ -1213,6 +1898,12 @@ private struct GameView: View {
 
             scoreInputDisplay
 
+            if let waitingPlayerName = vm.waitingPlayerName {
+                Label("Waiting for \(waitingPlayerName)...", systemImage: "hourglass")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
             keypad
         }
         .padding(.horizontal)
@@ -1326,7 +2017,7 @@ private struct GameView: View {
                 Haptics.selectionChanged()
                 vm.deleteDigit()
             }
-            .disabled(vm.scoreInput.isEmpty)
+            .disabled(vm.scoreInput.isEmpty || !vm.canEnterScore)
             .accessibilityLabel("Delete last digit")
             .onLongPressGesture {
                 Haptics.notify(.warning)
@@ -1349,6 +2040,7 @@ private struct GameView: View {
                         Haptics.impact()
                         vm.appendDigit(n)
                     }
+                    .disabled(!vm.canEnterScore)
                 }
             }
 
@@ -1361,12 +2053,13 @@ private struct GameView: View {
                     Haptics.impact()
                     vm.undo()
                 }
-                .disabled(vm.actionStack.isEmpty)
+                .disabled(vm.actionStack.isEmpty || vm.isOnlineGame)
 
                 KeyButton(title: "0", height: keyHeight) {
                     Haptics.impact()
                     vm.appendDigit(0)
                 }
+                .disabled(!vm.canEnterScore)
 
                 KeyIconButton(
                     systemName: "chevron.right",
@@ -1376,7 +2069,7 @@ private struct GameView: View {
                     Haptics.impact()
                     vm.submitTurn()
                 }
-                .disabled(!vm.isValidScoreInput)
+                .disabled(!vm.isValidScoreInput || !vm.canEnterScore)
             }
         }
     }
