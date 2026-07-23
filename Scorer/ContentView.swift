@@ -28,10 +28,17 @@ struct GameAction: Identifiable, Equatable {
     let turn: Turn
 }
 
+struct RosterEntry: Identifiable, Codable {
+    var id = UUID()
+    var name: String
+    var isEnabled: Bool
+}
+
 // MARK: - ViewModel
 
 @MainActor
 final class GameViewModel: ObservableObject {
+    private let rosterKey = "players.roster"
     private let playerNamesKey = "players.names"
     private var cancellables = Set<AnyCancellable>()
     private let startScoreKey = "settings.startScore"
@@ -73,12 +80,12 @@ final class GameViewModel: ObservableObject {
     @Published var legs: Int = 1
     @Published var sets: Int = 1
 
+    // Roster
+    @Published var roster: [RosterEntry] = []
+
     // Game State
     @Published var phase: Phase = .setup
-    @Published var players: [Player] = [
-        Player(name: "Player 1", remaining: 501, turns: []),
-        Player(name: "Player 2", remaining: 501, turns: [])
-    ]
+    @Published var players: [Player] = []
     @Published var currentPlayerIndex: Int = 0
     @Published private(set) var startingPlayerIndex: Int = 0
     @Published private(set) var legStartingPlayerIndex: Int = 0
@@ -134,11 +141,17 @@ final class GameViewModel: ObservableObject {
             if savedSets >= 1 { self.sets = savedSets }
         }
 
-        // Load saved player names if available (preserves order)
-        if let savedNames = defaults.array(forKey: playerNamesKey) as? [String], !savedNames.isEmpty {
-            self.players = savedNames.map { name in
-                Player(name: name, remaining: startScore, turns: [])
-            }
+        // Load roster; migrate from old player names key if roster not yet saved
+        if let data = defaults.data(forKey: rosterKey),
+           let saved = try? JSONDecoder().decode([RosterEntry].self, from: data) {
+            self.roster = saved
+        } else if let names = defaults.array(forKey: playerNamesKey) as? [String], !names.isEmpty {
+            self.roster = names.map { RosterEntry(name: $0, isEnabled: true) }
+        } else {
+            self.roster = [
+                RosterEntry(name: "Player 1", isEnabled: true),
+                RosterEntry(name: "Player 2", isEnabled: true)
+            ]
         }
 
         // Persist settings and names whenever they change
@@ -158,12 +171,12 @@ final class GameViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        $players
-            .map { $0.map { $0.name } }
-            .removeDuplicates()
-            .sink { [weak self] names in
+        $roster
+            .sink { [weak self] entries in
                 guard let self else { return }
-                defaults.set(names, forKey: self.playerNamesKey)
+                if let data = try? JSONEncoder().encode(entries) {
+                    defaults.set(data, forKey: self.rosterKey)
+                }
             }
             .store(in: &cancellables)
 
@@ -203,28 +216,39 @@ final class GameViewModel: ObservableObject {
     @Published private(set) var actionStack: [GameAction] = []
 
     var canStart: Bool {
-        let trimmed = players.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) }
-        return players.count >= 1 && !trimmed.contains(where: { $0.isEmpty })
+        roster.filter(\.isEnabled).contains {
+            !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var currentPlayer: Player {
         players[currentPlayerIndex]
     }
 
-    func addPlayer() {
-        players.append(Player(name: "Player \(players.count + 1)", remaining: startScore, turns: []))
+    func addRosterEntry() {
+        roster.append(RosterEntry(name: "Player \(roster.count + 1)", isEnabled: true))
     }
 
-    func removePlayers(at offsets: IndexSet) {
-        players.remove(atOffsets: offsets)
+    func removeRosterEntries(at offsets: IndexSet) {
+        roster.remove(atOffsets: offsets)
     }
-    
-    func movePlayers(from source: IndexSet, to destination: Int) {
-        players.move(fromOffsets: source, toOffset: destination)
+
+    func moveRosterEntries(from source: IndexSet, to destination: Int) {
+        roster.move(fromOffsets: source, toOffset: destination)
+    }
+
+    func toggleRosterEntry(id: UUID) {
+        guard let i = roster.firstIndex(where: { $0.id == id }) else { return }
+        roster[i].isEnabled.toggle()
     }
 
     func startGame() {
         guard canStart else { return }
+
+        // Rebuild game players from enabled roster entries
+        let enabledEntries = roster.filter(\.isEnabled)
+        players = enabledEntries.map { Player(name: $0.name, remaining: startScore, turns: []) }
+
         // Rotate starting player only when starting a new match from a completed one
         let nextStart: Int
         if case .finished(.matchWon) = phase {
@@ -243,10 +267,6 @@ final class GameViewModel: ObservableObject {
 
         actionStack.removeAll()
         scoreInput = ""
-        for i in players.indices {
-            players[i].remaining = startScore
-            players[i].turns.removeAll()
-        }
         phase = .inGame
     }
 
@@ -987,15 +1007,27 @@ private struct SetupView: View {
             }
 
             Section("Players") {
-                ForEach($vm.players) { $player in
-                    TextField("Name", text: $player.name)
-                        .textInputAutocapitalization(.words)
+                ForEach($vm.roster) { $entry in
+                    HStack(spacing: 12) {
+                        Button {
+                            vm.toggleRosterEntry(id: entry.id)
+                            Haptics.selectionChanged()
+                        } label: {
+                            Image(systemName: entry.isEnabled ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(entry.isEnabled ? Color.accentColor : Color.secondary)
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+
+                        TextField("Name", text: $entry.name)
+                            .textInputAutocapitalization(.words)
+                    }
                 }
-                .onDelete(perform: vm.removePlayers)
-                .onMove(perform: vm.movePlayers)
-                
+                .onDelete(perform: vm.removeRosterEntries)
+                .onMove(perform: vm.moveRosterEntries)
+
                 Button("Add Player") {
-                    vm.addPlayer()
+                    vm.addRosterEntry()
                 }
             }
 

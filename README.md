@@ -20,8 +20,9 @@ By Nick Ringelmann: [nickringelmann.com](https://nickringelmann.com) · [GitHub]
 - Out modes: Straight Out, Double Out, or Master Out
 - Match format: First to or Best of
 - Legs and sets: 1 to 13 each
-- Up to any number of players with custom names
-- Player order can be reordered and removed from the setup screen
+- Persistent player roster: save all your friends, toggle who plays each game
+- Add, rename, reorder, and delete roster entries inline
+- Player order can be reordered on the setup screen
 
 ### Scoring
 - Number keypad for fast score entry
@@ -57,7 +58,6 @@ Language can be changed in-app via Settings → Language, or in iOS Settings →
 ## Planned
 
 - Horizontal layout with usable UX
-- Player enable/disable and player list overhaul
 - Player statistics across games
 - First 9-dart average and other in-game stats
 - Casual modes (Around the World, etc.)
