@@ -1194,11 +1194,22 @@ struct ContentView: View {
                             playerDarts: vm.players.indices.map { vm.totalDarts(for: $0) },
                             playerAverage: vm.players.indices.map { vm.legAverageText(for: $0) },
                             playerTopScore: vm.players.indices.map { vm.topScore(for: $0) },
+                            isOnlineGame: vm.isOnlineGame,
+                            isLocalPlayerWinner: {
+                                guard let localIdx = vm.localPlayerIndex else { return true }
+                                switch reason {
+                                case .legWon(let i), .setWon(let i), .matchWon(let i): return i == localIdx
+                                }
+                            }(),
+                            opponentRequestedRematch: onlineManager.rematchRequested,
                             onContinue: {
                                 switch reason {
                                 case .legWon, .setWon, .matchWon:
                                     vm.continueAfterFinish(reason)
                                 }
+                            },
+                            onRequestRematch: {
+                                Task { try? await onlineManager.requestRematch() }
                             },
                             onBackToSetup: { vm.resetToSetup() }
                         )
@@ -1252,8 +1263,7 @@ private struct SetupView: View {
     let startOnlineLobby: (OnlineLobbyMode) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            List {
+        List {
                 Section("Game") {
                     Picker("Start", selection: Binding(
                         get: { vm.startScore },
@@ -1310,7 +1320,7 @@ private struct SetupView: View {
                     }
                 }
             }
-
+        .safeAreaInset(edge: .bottom) {
             HStack(spacing: 10) {
                 Menu {
                     Button {
@@ -1350,7 +1360,6 @@ private struct SetupView: View {
             .padding(.horizontal)
             .padding(.top, 4)
             .padding(.bottom, 8)
-            .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
         }
         .navigationTitle("Scorer 🎯 ")
         .navigationBarTitleDisplayMode(.inline)
@@ -1399,8 +1408,10 @@ private struct OnlineNameOnboardingView: View {
                 .padding(.horizontal)
             Spacer()
             Button(action: onSave) {
-                Text("Save Username")
+                Text("Save & Continue")
+                    .font(.headline)
                     .frame(maxWidth: .infinity)
+                    .frame(height: 50)
             }
             .glassProminentButtonStyle()
             .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -1873,7 +1884,6 @@ private struct SettingsView: View {
 private struct GameView: View {
     @ObservedObject var vm: GameViewModel
     @Binding var showSettings: Bool
-    @State private var showQuitConfirm = false
 
     private var gameOutTitle: String {
         vm.gameOut.rawValue
@@ -1921,21 +1931,15 @@ private struct GameView: View {
                 .accessibilityLabel("Settings")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showQuitConfirm = true
+                Menu {
+                    Button("Quit Game", role: .destructive) {
+                        vm.resetToSetup()
+                    }
                 } label: {
-                    Image(systemName: "xmark")
+                    Image(systemName: "xmark.circle")
                 }
-                .accessibilityLabel("Close Game")
+                .accessibilityLabel("Game Options")
             }
-        }
-        .alert("Quit Game?", isPresented: $showQuitConfirm) {
-            Button("Quit", role: .destructive) {
-                vm.resetToSetup()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will end the current game & return to main page.")
         }
     }
 
@@ -1943,10 +1947,10 @@ private struct GameView: View {
 
     private var scoreTiles: some View {
         Group {
-            if vm.players.count <= 2 {
-                HStack(spacing: 12) {
+            if vm.players.count == 2 {
+                HStack(alignment: .top, spacing: 10) {
                     ForEach(vm.players.indices, id: \.self) { i in
-                        playerTile(for: i)
+                        playerTile(for: i, layout: .duel)
                     }
                 }
             } else if vm.players.count <= 4 {
@@ -1982,7 +1986,7 @@ private struct GameView: View {
         }
     }
 
-    private func playerTile(for i: Int) -> some View {
+    private func playerTile(for i: Int, layout: PlayerTileLayout = .standard) -> some View {
         let p = vm.players[i]
         let checkoutParts = vm.finishSegments(for: p.remaining)
         let checkoutText = checkoutParts.isEmpty ? nil : checkoutParts.joined(separator: " ")
@@ -1995,7 +1999,8 @@ private struct GameView: View {
             legsWon: i < vm.legsWon.count ? vm.legsWon[i] : 0,
             setsWon: i < vm.setsWon.count ? vm.setsWon[i] : 0,
             showSets: vm.sets > 1,
-            showLegs: vm.legs > 1 || vm.sets > 1
+            showLegs: vm.legs > 1 || vm.sets > 1,
+            layout: layout
         )
         .id(i)
     }
@@ -2075,6 +2080,11 @@ private struct GameView: View {
     }
 }
 
+private enum PlayerTileLayout {
+    case standard
+    case duel
+}
+
 private struct PlayerTile: View {
     let name: String
     let averageText: String
@@ -2085,49 +2095,125 @@ private struct PlayerTile: View {
     let setsWon: Int
     let showSets: Bool
     let showLegs: Bool
+    let layout: PlayerTileLayout
+
+    private var isDuelLayout: Bool {
+        layout == .duel
+    }
+
+    private var supportingStyle: Color {
+        isActive ? Color.primary.opacity(0.76) : Color.secondary
+    }
+
+    private var scoreFont: Font {
+        isDuelLayout ? .system(size: 56, weight: .black) : .system(size: 44, weight: .bold)
+    }
+
+    private var tileFill: Color {
+        isActive ? Color(UIColor.secondarySystemGroupedBackground) : Color(UIColor.tertiarySystemGroupedBackground)
+    }
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: isDuelLayout ? 10 : 6) {
+            HStack(alignment: .top, spacing: 8) {
                 Text(name)
-                    .font(.headline)
-                Spacer()
-                Text("Ø\(averageText)")
-                    .font(.subheadline)
-                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+                    .font(isDuelLayout ? .title3.weight(.semibold) : .headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Spacer(minLength: 8)
+
+                if isDuelLayout && isActive {
+                    Text("Throw")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.blue, in: Capsule())
+                        .accessibilityLabel("Current throw")
+                } else {
+                    Text("Ø\(averageText)")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundStyle(supportingStyle)
+                }
             }
 
-            if showSets {
-                Text("Sets: \(setsWon) · Legs: \(legsWon)")
-                    .font(.subheadline)
-                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+            if isDuelLayout {
+                Text("\(remaining)")
+                    .monospacedDigit()
+                    .font(scoreFont)
+                    .minimumScaleFactor(0.72)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else if showLegs {
-                Text("Legs: \(legsWon)")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(checkoutText ?? "No finish")
+                        .font(.callout.weight(checkoutText == nil ? .regular : .medium))
+                        .foregroundStyle(checkoutText == nil ? .secondary : supportingStyle)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    HStack(spacing: 8) {
+                        statChip(label: "Avg", value: averageText)
+
+                        if showSets {
+                            statChip(label: "Sets", value: "\(setsWon)")
+                            statChip(label: "Legs", value: "\(legsWon)")
+                        } else if showLegs {
+                            statChip(label: "Legs", value: "\(legsWon)")
+                        }
+                    }
+                }
+            } else {
+                if showSets {
+                    Text("Sets: \(setsWon) · Legs: \(legsWon)")
+                        .font(.subheadline)
+                        .foregroundStyle(supportingStyle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if showLegs {
+                    Text("Legs: \(legsWon)")
+                        .font(.subheadline)
+                        .foregroundStyle(supportingStyle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Text(checkoutText ?? " ")
                     .font(.subheadline)
-                    .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
+                    .foregroundStyle(supportingStyle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+
+                Text("\(remaining)")
+                    .monospacedDigit()
+                    .font(scoreFont)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Text(checkoutText ?? " ")
-                .font(.subheadline)
-                .foregroundStyle(isActive ? Color.primary.opacity(0.85) : Color.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(1)
-
-            Text("\(remaining)")
-                .monospacedDigit()
-                .font(.system(size: 44, weight: .bold))
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .background {
-            if isActive {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(UIColor.secondarySystemGroupedBackground))
-            }
+        .padding(isDuelLayout ? 16 : 14)
+        .frame(maxWidth: .infinity, minHeight: isDuelLayout ? 178 : nil, alignment: .topLeading)
+        .background(tileFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isActive ? Color.blue.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: isActive ? 1.5 : 1)
         }
         .foregroundStyle(.primary)
+        .opacity(isActive || !isDuelLayout ? 1 : 0.72)
+    }
+
+    private func statChip(label: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
+        }
+        .font(.caption.weight(.medium))
+        .lineLimit(1)
+        .minimumScaleFactor(0.78)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.06), in: Capsule())
     }
 }
 
@@ -2232,8 +2318,14 @@ private struct FinishedOverlay: View {
     let playerDarts: [Int]
     let playerAverage: [String]
     let playerTopScore: [Int]
+    var isOnlineGame: Bool = false
+    var isLocalPlayerWinner: Bool = true
+    var opponentRequestedRematch: Bool = false
     let onContinue: () -> Void
+    var onRequestRematch: () -> Void = {}
     let onBackToSetup: () -> Void
+
+    @State private var rematchRequestSent = false
 
     private var winnerIndex: Int {
         switch reason {
@@ -2302,15 +2394,34 @@ private struct FinishedOverlay: View {
 
                 // Buttons
                 VStack(spacing: 10) {
-                    Button {
-                        onContinue()
-                    } label: {
-                        Text(continueLabel)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
+                    if case .matchWon = reason, isOnlineGame, !isLocalPlayerWinner {
+                        Button {
+                            rematchRequestSent = true
+                            onRequestRematch()
+                        } label: {
+                            Text(rematchRequestSent ? "Rematch Requested" : "Request Rematch")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(rematchRequestSent)
+                    } else {
+                        if case .matchWon = reason, isOnlineGame, opponentRequestedRematch {
+                            Text("Your opponent wants a rematch!")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            onContinue()
+                        } label: {
+                            Text(continueLabel)
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
 
                     Button {
                         onBackToSetup()

@@ -30,6 +30,7 @@ By Nick Ringelmann: [nickringelmann.com](https://nickringelmann.com) · [GitHub]
 - Bust detection per out mode
 - Undo last turn at any time
 - Live average displayed per player on tile
+- Expanded head-to-head player tiles for two-player games
 - Checkout suggestions shown on player tiles for Double Out and Master Out (up to 170)
 
 ### Leg & Match Tracking

@@ -63,6 +63,7 @@ final class OnlineGameManager: ObservableObject {
 
     @Published var status: OnlineStatus = .idle
     @Published var remotePlayerName: String = ""
+    @Published var rematchRequested = false
 
     private let publicDB = CKContainer.default().publicCloudDatabase
     private var sessionRecordID: CKRecord.ID?
@@ -153,8 +154,17 @@ final class OnlineGameManager: ObservableObject {
         let record = try await publicDB.record(for: recordID)
         record["gameStateData"] = try JSONEncoder().encode(state) as CKRecordValue
         record["status"] = state.phaseTag.hasPrefix("finished:match") ? "finished" as CKRecordValue : "active" as CKRecordValue
+        record["rematchRequested"] = 0 as CKRecordValue
         _ = try await publicDB.save(record)
         latestVersion = state.version
+        rematchRequested = false
+    }
+
+    func requestRematch() async throws {
+        guard let recordID = sessionRecordID else { return }
+        let record = try await publicDB.record(for: recordID)
+        record["rematchRequested"] = 1 as CKRecordValue
+        _ = try await publicDB.save(record)
     }
 
     func disconnect() {
@@ -162,6 +172,7 @@ final class OnlineGameManager: ObservableObject {
         lobbyCode = nil
         latestVersion = 0
         remotePlayerName = ""
+        rematchRequested = false
         status = .idle
     }
 
@@ -175,6 +186,7 @@ final class OnlineGameManager: ObservableObject {
             if case .hosting = status, record["status"] as? String == "active" {
                 status = .hosting(code: lobbyCode ?? "")
             }
+            rematchRequested = (record["rematchRequested"] as? Int ?? 0) == 1
             if let state = decodeState(from: record), state.version > latestVersion {
                 latestVersion = state.version
                 vm?.applyOnlineState(state)
